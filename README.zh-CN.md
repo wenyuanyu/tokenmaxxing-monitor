@@ -93,6 +93,8 @@ idf.py -p /dev/cu.usbmodem* flash
 
 **前置要求：** Node.js v18–v22
 
+> **⚠️ macOS 用户：不要在 tmux 或 screen 中运行 Bridge。** CoreBluetooth 权限绑定在 GUI 登录会话上，终端复用器无法继承该权限，进程会静默崩溃（exit code 134）。请使用原生 Terminal.app / iTerm2 窗口。
+
 ```bash
 # 安装依赖（首次）
 cd bridge

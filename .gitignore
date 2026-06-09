@@ -1,0 +1,19 @@
+# Build artifacts
+firmware/build/
+firmware/sdkconfig.old
+
+# Dependencies
+bridge/node_modules/
+firmware/managed_components/
+
+# Secrets
+firmware/main/secrets.h
+
+# IDE & OS
+.DS_Store
+._*
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

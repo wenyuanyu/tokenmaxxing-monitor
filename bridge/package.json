@@ -1,0 +1,11 @@
+{
+  "name": "qwen-token-monitor-ble-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@abandonware/noble": "^1.9.2-25"
+  }
+}

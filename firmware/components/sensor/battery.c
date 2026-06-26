@@ -26,24 +26,9 @@ static int clamp_int(int v, int lo, int hi)
 
 static int lipo_percent_from_mv(int mv)
 {
-    static const struct {
-        int mv;
-        int pct;
-    } curve[] = {
-        {4200, 100}, {4110, 90}, {4030, 80}, {3980, 70}, {3920, 60},
-        {3870, 50},  {3830, 40}, {3790, 30}, {3740, 20}, {3680, 10},
-        {3400, 0},
-    };
-
-    if (mv >= curve[0].mv) return 100;
-    for (int i = 0; i < (int)(sizeof(curve) / sizeof(curve[0])) - 1; i++) {
-        if (mv >= curve[i + 1].mv) {
-            int dv = curve[i].mv - curve[i + 1].mv;
-            int dp = curve[i].pct - curve[i + 1].pct;
-            return curve[i + 1].pct + (mv - curve[i + 1].mv) * dp / dv;
-        }
-    }
-    return 0;
+    if (mv < 3000) return 0;
+    if (mv > 4120) return 100;
+    return (mv - 3000) * 100 / (4120 - 3000);
 }
 
 esp_err_t battery_init(void)

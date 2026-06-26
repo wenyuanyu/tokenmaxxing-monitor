@@ -13,6 +13,9 @@ LV_FONT_DECLARE(font_zh18);
 
 #define INK   lv_color_black()
 #define WHITE lv_color_white()
+#define GRAY1 lv_color_hex(0xC0C0C0)
+#define GRAY2 lv_color_hex(0x888888)
+#define GRAY3 lv_color_hex(0x505050)
 
 static lv_obj_t *lbl_greeting;
 static lv_obj_t *lbl_time;
@@ -35,6 +38,13 @@ static lv_obj_t *lbl_battery_pct;
 static lv_obj_t *battery_bolt;
 static lv_obj_t *bar_goal;
 static lv_obj_t *lbl_goal;
+static lv_obj_t *page_activity;
+static lv_obj_t *lbl_activity_greeting;
+static lv_obj_t *lbl_activity_time;
+static lv_obj_t *lbl_activity_env;
+static lv_obj_t *lbl_activity_battery_pct;
+static lv_obj_t *activity_battery_bolt;
+static bool s_activity_visible;
 
 #define GOAL_TARGET 100000000LL  /* 一个亿 */
 
@@ -122,6 +132,17 @@ static lv_obj_t *label(lv_obj_t *p, int x, int y, const lv_font_t *font,
     return obj;
 }
 
+static lv_obj_t *surface(lv_obj_t *p, int x, int y, int w, int h)
+{
+    lv_obj_t *obj = lv_obj_create(p);
+    lv_obj_remove_style_all(obj);
+    lv_obj_set_pos(obj, x, y);
+    lv_obj_set_size(obj, w, h);
+    lv_obj_set_style_bg_color(obj, WHITE, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    return obj;
+}
+
 static lv_obj_t *aligned(lv_obj_t *p, int x, int y, int w,
                          lv_text_align_t align, const lv_font_t *font,
                          const char *text)
@@ -156,6 +177,21 @@ static lv_obj_t *rect(lv_obj_t *p, int x, int y, int w, int h, bool fill)
     return obj;
 }
 
+static void heat_cell(lv_obj_t *p, int col, int row, int level)
+{
+    static const lv_color_t colors[] = { WHITE, GRAY1, GRAY2, GRAY3, INK };
+    if (level < 0) level = 0;
+    if (level > 4) level = 4;
+    lv_obj_t *obj = lv_obj_create(p);
+    lv_obj_remove_style_all(obj);
+    lv_obj_set_pos(obj, 52 + col * 12, 124 + row * 12);
+    lv_obj_set_size(obj, 10, 10);
+    lv_obj_set_style_bg_color(obj, colors[level], 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(obj, GRAY3, 0);
+    lv_obj_set_style_border_width(obj, 1, 0);
+}
+
 static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
 {
     static const lv_point_precise_t pts[] = {
@@ -169,6 +205,72 @@ static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
     lv_obj_set_style_line_width(obj, 2, 0);
     lv_obj_set_style_line_rounded(obj, false, 0);
     return obj;
+}
+
+static int activity_level_for_cell(int col, int row)
+{
+    if (col > 20) {
+        static const uint8_t recent[5][7] = {
+            {0, 0, 0, 0, 0, 0, 0},
+            {0, 0, 1, 0, 0, 0, 0},
+            {0, 0, 2, 0, 1, 0, 0},
+            {1, 3, 0, 2, 2, 1, 0},
+            {2, 4, 4, 4, 2, 0, 0},
+        };
+        return recent[col - 21][row];
+    }
+    if ((col == 2 && row == 6) || (col == 3 && row == 0) || (col == 6 && row == 3)) return 1;
+    if ((col == 12 && row == 2) || (col == 17 && row == 4) || (col == 19 && row == 1)) return 1;
+    return 0;
+}
+
+static void create_activity_page(lv_obj_t *s)
+{
+    page_activity = surface(s, 0, 0, 400, 300);
+    lv_obj_add_flag(page_activity, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_activity_greeting = aligned(page_activity, 12, 8, 150, LV_TEXT_ALIGN_LEFT,
+                                    &font_zh18, greeting_for_stamp(NULL));
+    lbl_activity_time = aligned(page_activity, 162, 10, 100, LV_TEXT_ALIGN_CENTER,
+                                &lv_font_montserrat_14, "-- --:--");
+    lbl_activity_env = aligned(page_activity, 272, 10, 118, LV_TEXT_ALIGN_RIGHT,
+                               &lv_font_montserrat_14, "--.-\xC2\xB0""C --%");
+    divider(page_activity, 10, 34, 380, 2);
+
+    label(page_activity, 12, 49, &lv_font_montserrat_16, "Token activity");
+    label(page_activity, 165, 51, &lv_font_montserrat_14, "last 6 months");
+    label(page_activity, 12, 74, &lv_font_montserrat_14, "Lifetime");
+    label(page_activity, 86, 74, &font_amt14, "183M");
+    label(page_activity, 158, 74, &lv_font_montserrat_14, "Peak");
+    label(page_activity, 210, 74, &font_amt14, "48.3M");
+    label(page_activity, 284, 74, &lv_font_montserrat_14, "Streak");
+    label(page_activity, 354, 74, &font_amt14, "4d");
+    label(page_activity, 12, 94, &lv_font_montserrat_14, "Longest task 36m");
+
+    const char *months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun" };
+    const int month_x[] = { 46, 94, 142, 190, 238, 286 };
+    for (int i = 0; i < 6; i++) {
+        label(page_activity, month_x[i], 110, &lv_font_montserrat_12, months[i]);
+    }
+
+    static const char *days[] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
+    for (int row = 0; row < 7; row++) {
+        aligned(page_activity, 12, 123 + row * 12, 28, LV_TEXT_ALIGN_RIGHT,
+                &lv_font_montserrat_12, days[row]);
+    }
+
+    for (int col = 0; col < 26; col++) {
+        for (int row = 0; row < 7; row++) {
+            heat_cell(page_activity, col, row, activity_level_for_cell(col, row));
+        }
+    }
+
+    rect(page_activity, 282, 270, 66, 22, false);
+    rect(page_activity, 350, 276, 4, 10, true);
+    lbl_activity_battery_pct = aligned(page_activity, 286, 274, 58, LV_TEXT_ALIGN_CENTER,
+                                       &lv_font_montserrat_14, "--%");
+    activity_battery_bolt = bolt(page_activity, 364, 270);
+    lv_obj_add_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_app_init(void)
@@ -257,6 +359,8 @@ void ui_app_init(void)
                               &lv_font_montserrat_14, "--%");
     battery_bolt = bolt(s, 364, 270);
     lv_obj_add_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
+
+    create_activity_page(s);
 }
 
 void ui_app_update(const usage_report_t *r)
@@ -285,6 +389,10 @@ void ui_app_update(const usage_report_t *r)
     if (r->updated_at[0]) {
         lv_label_set_text(lbl_time, r->updated_at);
         lv_label_set_text(lbl_greeting, greeting_for_stamp(r->updated_at));
+        if (lbl_activity_time) lv_label_set_text(lbl_activity_time, r->updated_at);
+        if (lbl_activity_greeting) {
+            lv_label_set_text(lbl_activity_greeting, greeting_for_stamp(r->updated_at));
+        }
     }
 
     /* top 3 models */
@@ -327,6 +435,7 @@ void ui_app_set_env(float temp_c, float humidity, bool ok)
         snprintf(b, sizeof(b), "env --.-C --%%");
     }
     lv_label_set_text(lbl_env, b);
+    if (lbl_activity_env) lv_label_set_text(lbl_activity_env, b);
 }
 
 void ui_app_set_battery(int percent, bool ok, bool charging)
@@ -340,20 +449,40 @@ void ui_app_set_battery(int percent, bool ok, bool charging)
         snprintf(b, sizeof(b), "--%%");
     }
     lv_label_set_text(lbl_battery_pct, b);
+    if (lbl_activity_battery_pct) lv_label_set_text(lbl_activity_battery_pct, b);
 
     if (charging) {
         lv_obj_remove_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
+        if (activity_battery_bolt) {
+            lv_obj_remove_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);
+        }
     } else {
         lv_obj_add_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
+        if (activity_battery_bolt) {
+            lv_obj_add_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 }
 
 void ui_app_set_time(const char *hm)
 {
     if (hm && hm[0]) lv_label_set_text(lbl_time, hm);
+    if (hm && hm[0] && lbl_activity_time) lv_label_set_text(lbl_activity_time, hm);
 }
 
 void ui_app_mark_stale(void)
 {
     lv_label_set_text(lbl_active, "stale");
+}
+
+void ui_app_toggle_activity(void)
+{
+    if (!page_activity) return;
+    s_activity_visible = !s_activity_visible;
+    if (s_activity_visible) {
+        lv_obj_remove_flag(page_activity, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(page_activity);
+    } else {
+        lv_obj_add_flag(page_activity, LV_OBJ_FLAG_HIDDEN);
+    }
 }

@@ -1,6 +1,7 @@
 # Build artifacts
 firmware/build/
 firmware/sdkconfig.old
+tools/lvgl_preview/build/
 
 # Dependencies
 bridge/node_modules/

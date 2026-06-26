@@ -256,6 +256,7 @@ void ui_app_init(void)
     lbl_battery_pct = aligned(s, 286, 274, 58, LV_TEXT_ALIGN_CENTER,
                               &lv_font_montserrat_14, "--%");
     battery_bolt = bolt(s, 364, 270);
+    lv_obj_add_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_app_update(const usage_report_t *r)

@@ -23,7 +23,7 @@ static void env_task(void *arg)
         bool battery_ok = (battery_read(&battery_pct, NULL) == ESP_OK);
         if (Lvgl_lock(-1)) {
             ui_app_set_env(t, h, ok);
-            ui_app_set_battery(battery_pct, battery_ok, true);
+            ui_app_set_battery(battery_pct, battery_ok, false);
             Lvgl_unlock();
         }
         vTaskDelay(pdMS_TO_TICKS(10000));

@@ -68,7 +68,11 @@ static usage_report_t dummy_report()
     r.cache_total = 2386200;
     r.thought_total = 0;
     r.week_total = 28400000;
+    r.lifetime_total = 183400000;
+    r.peak_daily_total = 48300000;
     r.age_sec = 1;
+    r.streak_days = 4;
+    r.longest_task_minutes = 36;
     std::snprintf(r.model, sizeof(r.model), "codex-5");
     std::snprintf(r.model_1, sizeof(r.model_1), "codex-5");
     std::snprintf(r.model_2, sizeof(r.model_2), "qwen3-coder-plus");
@@ -77,6 +81,32 @@ static usage_report_t dummy_report()
     r.model_2_pct = 25;
     r.model_3_pct = 13;
     std::snprintf(r.updated_at, sizeof(r.updated_at), "06-26 22:48");
+    const uint32_t recent_tokens[5][7] = {
+        {0, 0, 0, 0, 0, 0, 0},
+        {0, 0, 420000, 0, 0, 0, 0},
+        {0, 0, 5800000, 0, 750000, 0, 0},
+        {900000, 36000000, 0, 7200000, 8800000, 280000, 0},
+        {6400000, 135000000, 108000000, 124000000, 5200000, 0, 0},
+    };
+    auto level_for_tokens = [](uint32_t tokens) {
+        if (tokens == 0) return 0;
+        if (tokens < 1000000U) return 1;
+        if (tokens < 10000000U) return 2;
+        if (tokens < 100000000U) return 3;
+        return 4;
+    };
+    for (int col = 0; col < 26; col++) {
+        for (int row = 0; row < 7; row++) {
+            uint32_t tokens = 0;
+            if (col > 20) tokens = recent_tokens[col - 21][row];
+            else if ((col == 2 && row == 6) || (col == 3 && row == 0) ||
+                     (col == 6 && row == 3) || (col == 12 && row == 2) ||
+                     (col == 17 && row == 4) || (col == 19 && row == 1)) {
+                tokens = 360000;
+            }
+            r.activity_levels[col][row] = level_for_tokens(tokens);
+        }
+    }
     r.valid = true;
     return r;
 }

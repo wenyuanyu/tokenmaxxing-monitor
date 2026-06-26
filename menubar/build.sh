@@ -65,8 +65,12 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <dict>
     <key>CFBundleName</key>
     <string>QwenBridgeBar</string>
+    <key>CFBundleExecutable</key>
+    <string>QwenBridgeBar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.pomelo.qwen-bridge-bar</string>
+    <string>io.github.tokenmaxxing.rlcd-bridge-bar</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>
@@ -82,6 +86,9 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+chmod +x "$APP_DIR/Contents/MacOS/$APP_NAME"
+codesign --force --deep --sign - "$APP_DIR" >/dev/null
 
 rm "$SCRIPT_DIR/$APP_NAME"
 echo "✓ Built: $APP_DIR"

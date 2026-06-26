@@ -1,11 +1,13 @@
 #include "ui_app.h"
 
+#include "esp_timer.h"
 #include "lvgl.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #ifndef RLCD_GREETING_NAME
-#define RLCD_GREETING_NAME "玟渊"
+#define RLCD_GREETING_NAME ""
 #endif
 
 LV_FONT_DECLARE(font_amt14);
@@ -42,9 +44,22 @@ static lv_obj_t *page_activity;
 static lv_obj_t *lbl_activity_greeting;
 static lv_obj_t *lbl_activity_time;
 static lv_obj_t *lbl_activity_env;
+static lv_obj_t *lbl_activity_lifetime;
+static lv_obj_t *lbl_activity_peak;
+static lv_obj_t *lbl_activity_streak;
+static lv_obj_t *lbl_activity_longest_task;
 static lv_obj_t *lbl_activity_battery_pct;
 static lv_obj_t *activity_battery_bolt;
+static lv_obj_t *activity_cells[26][7];
 static bool s_activity_visible;
+static bool s_clock_valid;
+static int s_clock_month;
+static int s_clock_day;
+static int s_clock_hour;
+static int s_clock_min;
+static int s_clock_sec;
+static int64_t s_clock_anchor_sec;
+static char s_clock_rendered[16];
 
 #define GOAL_TARGET 100000000LL  /* 一个亿 */
 
@@ -108,6 +123,81 @@ static const char *greeting_for_stamp(const char *s)
         snprintf(s_greeting, sizeof(s_greeting), "%s", period);
     }
     return s_greeting;
+}
+
+static int64_t uptime_sec(void)
+{
+    return esp_timer_get_time() / 1000000LL;
+}
+
+static int days_in_month(int month)
+{
+    static const int days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (month < 1 || month > 12) return 31;
+    return days[month - 1];
+}
+
+static bool parse_bridge_stamp(const char *s, int *month, int *day,
+                               int *hour, int *min, int *sec)
+{
+    int mo = 0, da = 0, hh = 0, mm = 0, ss = 0;
+    if (!s || sscanf(s, "%2d-%2d %2d:%2d:%2d", &mo, &da, &hh, &mm, &ss) != 5) {
+        return false;
+    }
+    if (mo < 1 || mo > 12 || da < 1 || da > days_in_month(mo) ||
+        hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
+        return false;
+    }
+    *month = mo;
+    *day = da;
+    *hour = hh;
+    *min = mm;
+    *sec = ss;
+    return true;
+}
+
+static void advance_local_day(int *month, int *day)
+{
+    (*day)++;
+    if (*day <= days_in_month(*month)) return;
+    *day = 1;
+    (*month)++;
+    if (*month > 12) *month = 1;
+}
+
+static void format_clock_stamp(char *out, size_t out_size,
+                               int month, int day, int hour, int min, int sec)
+{
+    snprintf(out, out_size, "%02d-%02d %02d:%02d:%02d",
+             month, day, hour, min, sec);
+}
+
+static void sync_clock_from_stamp(const char *stamp)
+{
+    int mo = 0, da = 0, hh = 0, mm = 0, ss = 0;
+    if (!parse_bridge_stamp(stamp, &mo, &da, &hh, &mm, &ss)) return;
+    s_clock_month = mo;
+    s_clock_day = da;
+    s_clock_hour = hh;
+    s_clock_min = mm;
+    s_clock_sec = ss;
+    s_clock_anchor_sec = uptime_sec();
+    s_clock_valid = true;
+    s_clock_rendered[0] = '\0';
+}
+
+static void apply_clock_labels(const char *stamp)
+{
+    if (!stamp || !stamp[0] || strcmp(s_clock_rendered, stamp) == 0) return;
+    strncpy(s_clock_rendered, stamp, sizeof(s_clock_rendered) - 1);
+    s_clock_rendered[sizeof(s_clock_rendered) - 1] = '\0';
+
+    lv_label_set_text(lbl_time, s_clock_rendered);
+    lv_label_set_text(lbl_greeting, greeting_for_stamp(s_clock_rendered));
+    if (lbl_activity_time) lv_label_set_text(lbl_activity_time, s_clock_rendered);
+    if (lbl_activity_greeting) {
+        lv_label_set_text(lbl_activity_greeting, greeting_for_stamp(s_clock_rendered));
+    }
 }
 
 static void fmt_minutes(char *o, size_t n, int32_t minutes)
@@ -177,19 +267,42 @@ static lv_obj_t *rect(lv_obj_t *p, int x, int y, int w, int h, bool fill)
     return obj;
 }
 
-static void heat_cell(lv_obj_t *p, int col, int row, int level)
+static lv_color_t activity_color_for_level(int level)
 {
-    static const lv_color_t colors[] = { WHITE, GRAY1, GRAY2, GRAY3, INK };
+    static const lv_color_t colors[] = {
+        WHITE,
+        lv_color_make(0x11, 0x00, 0x11),
+        lv_color_make(0x22, 0x00, 0x22),
+        lv_color_make(0x33, 0x00, 0x33),
+        lv_color_make(0x44, 0x00, 0x44),
+    };
     if (level < 0) level = 0;
     if (level > 4) level = 4;
+    return colors[level];
+}
+
+static void set_heat_cell_level(int col, int row, int level)
+{
+    if (col < 0 || col >= 26 || row < 0 || row >= 7) return;
+    if (!activity_cells[col][row]) return;
+    if (level < 0) level = 0;
+    if (level > 4) level = 4;
+
+    lv_obj_set_style_bg_color(activity_cells[col][row], activity_color_for_level(level), 0);
+}
+
+static void heat_cell(lv_obj_t *p, int col, int row, int level)
+{
     lv_obj_t *obj = lv_obj_create(p);
     lv_obj_remove_style_all(obj);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(obj, 52 + col * 12, 124 + row * 12);
     lv_obj_set_size(obj, 10, 10);
-    lv_obj_set_style_bg_color(obj, colors[level], 0);
+    lv_obj_set_style_bg_color(obj, activity_color_for_level(level), 0);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(obj, GRAY3, 0);
     lv_obj_set_style_border_width(obj, 1, 0);
+    activity_cells[col][row] = obj;
 }
 
 static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
@@ -207,21 +320,34 @@ static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
     return obj;
 }
 
+static int activity_level_for_tokens(uint64_t tokens)
+{
+    if (tokens == 0) return 0;
+    if (tokens < 1000000ULL) return 1;
+    if (tokens < 10000000ULL) return 2;
+    if (tokens < 100000000ULL) return 3;
+    return 4;
+}
+
 static int activity_level_for_cell(int col, int row)
 {
     if (col > 20) {
-        static const uint8_t recent[5][7] = {
+        static const uint32_t recent_tokens[5][7] = {
             {0, 0, 0, 0, 0, 0, 0},
-            {0, 0, 1, 0, 0, 0, 0},
-            {0, 0, 2, 0, 1, 0, 0},
-            {1, 3, 0, 2, 2, 1, 0},
-            {2, 4, 4, 4, 2, 0, 0},
+            {0, 0, 420000, 0, 0, 0, 0},
+            {0, 0, 5800000, 0, 750000, 0, 0},
+            {900000, 36000000, 0, 7200000, 8800000, 280000, 0},
+            {6400000, 135000000, 108000000, 124000000, 5200000, 0, 0},
         };
-        return recent[col - 21][row];
+        return activity_level_for_tokens(recent_tokens[col - 21][row]);
     }
-    if ((col == 2 && row == 6) || (col == 3 && row == 0) || (col == 6 && row == 3)) return 1;
-    if ((col == 12 && row == 2) || (col == 17 && row == 4) || (col == 19 && row == 1)) return 1;
-    return 0;
+    if ((col == 2 && row == 6) || (col == 3 && row == 0) || (col == 6 && row == 3)) {
+        return activity_level_for_tokens(360000);
+    }
+    if ((col == 12 && row == 2) || (col == 17 && row == 4) || (col == 19 && row == 1)) {
+        return activity_level_for_tokens(780000);
+    }
+    return activity_level_for_tokens(0);
 }
 
 static void create_activity_page(lv_obj_t *s)
@@ -240,12 +366,13 @@ static void create_activity_page(lv_obj_t *s)
     label(page_activity, 12, 49, &lv_font_montserrat_16, "Token activity");
     label(page_activity, 165, 51, &lv_font_montserrat_14, "last 6 months");
     label(page_activity, 12, 74, &lv_font_montserrat_14, "Lifetime");
-    label(page_activity, 86, 74, &font_amt14, "183M");
+    lbl_activity_lifetime = label(page_activity, 86, 74, &font_amt14, "--");
     label(page_activity, 158, 74, &lv_font_montserrat_14, "Peak");
-    label(page_activity, 210, 74, &font_amt14, "48.3M");
+    lbl_activity_peak = label(page_activity, 210, 74, &font_amt14, "--");
     label(page_activity, 284, 74, &lv_font_montserrat_14, "Streak");
-    label(page_activity, 354, 74, &font_amt14, "4d");
-    label(page_activity, 12, 94, &lv_font_montserrat_14, "Longest task 36m");
+    lbl_activity_streak = label(page_activity, 354, 74, &font_amt14, "--");
+    lbl_activity_longest_task = label(page_activity, 12, 94, &lv_font_montserrat_14,
+                                      "Longest task --");
 
     const char *months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun" };
     const int month_x[] = { 46, 94, 142, 190, 238, 286 };
@@ -387,12 +514,8 @@ void ui_app_update(const usage_report_t *r)
 
     /* header: greeting + time */
     if (r->updated_at[0]) {
-        lv_label_set_text(lbl_time, r->updated_at);
-        lv_label_set_text(lbl_greeting, greeting_for_stamp(r->updated_at));
-        if (lbl_activity_time) lv_label_set_text(lbl_activity_time, r->updated_at);
-        if (lbl_activity_greeting) {
-            lv_label_set_text(lbl_activity_greeting, greeting_for_stamp(r->updated_at));
-        }
+        sync_clock_from_stamp(r->updated_at);
+        ui_app_refresh_clock();
     }
 
     /* top 3 models */
@@ -424,6 +547,30 @@ void ui_app_update(const usage_report_t *r)
 
     fmt_tok_m(n, sizeof(n), r->week_total);
     lv_label_set_text(lbl_week, n);
+
+    if (lbl_activity_lifetime) {
+        fmt_tok_short(n, sizeof(n), r->lifetime_total);
+        lv_label_set_text(lbl_activity_lifetime, n);
+    }
+    if (lbl_activity_peak) {
+        fmt_tok_short(n, sizeof(n), r->peak_daily_total);
+        lv_label_set_text(lbl_activity_peak, n);
+    }
+    if (lbl_activity_streak) {
+        snprintf(b, sizeof(b), "%dd", (int)r->streak_days);
+        lv_label_set_text(lbl_activity_streak, b);
+    }
+    if (lbl_activity_longest_task) {
+        fmt_minutes(n, sizeof(n), r->longest_task_minutes);
+        snprintf(b, sizeof(b), "Longest task %s", n);
+        lv_label_set_text(lbl_activity_longest_task, b);
+    }
+
+    for (int col = 0; col < 26; col++) {
+        for (int row = 0; row < 7; row++) {
+            set_heat_cell_level(col, row, r->activity_levels[col][row]);
+        }
+    }
 }
 
 void ui_app_set_env(float temp_c, float humidity, bool ok)
@@ -468,6 +615,46 @@ void ui_app_set_time(const char *hm)
 {
     if (hm && hm[0]) lv_label_set_text(lbl_time, hm);
     if (hm && hm[0] && lbl_activity_time) lv_label_set_text(lbl_activity_time, hm);
+}
+
+void ui_app_refresh_clock(void)
+{
+    if (!s_clock_valid) return;
+
+    int64_t elapsed = uptime_sec() - s_clock_anchor_sec;
+    if (elapsed < 0) elapsed = 0;
+
+    int month = s_clock_month;
+    int day = s_clock_day;
+    int hour = s_clock_hour;
+    int min = s_clock_min;
+    int sec = s_clock_sec + (int)(elapsed % 60);
+    int carry_min = (int)(elapsed / 60);
+
+    if (sec >= 60) {
+        sec -= 60;
+        carry_min++;
+    }
+    min += carry_min % 60;
+    int carry_hour = carry_min / 60;
+    if (min >= 60) {
+        min -= 60;
+        carry_hour++;
+    }
+    hour += carry_hour % 24;
+    int carry_day = carry_hour / 24;
+    if (hour >= 24) {
+        hour -= 24;
+        carry_day++;
+    }
+
+    while (carry_day-- > 0) {
+        advance_local_day(&month, &day);
+    }
+
+    char stamp[16];
+    format_clock_stamp(stamp, sizeof(stamp), month, day, hour, min, sec);
+    apply_clock_labels(stamp);
 }
 
 void ui_app_mark_stale(void)

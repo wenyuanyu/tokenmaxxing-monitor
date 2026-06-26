@@ -1,261 +1,306 @@
-# Token Monitor BLE
+# TokenMaxxing RLCD
 
 English | [中文](README.zh-CN.md)
 
-> **Vibe Coding Project** — This project was built entirely through AI-driven conversational development (vibe coding). The original prompt:
->
-> *"Referencing https://github.com/CEJXXX/token-monitor-RLCD, build a Qwen Code token monitor on the Waveshare ESP32-S3-RLCD-4.2 with a developer-friendly display. What do you suggest? Give me a plan first, we'll discuss before implementing."*
+TokenMaxxing RLCD is a local-first token activity meter for AI coding agents. A
+Node.js bridge aggregates token usage from configured data sources, pushes a
+compact BLE payload to a Waveshare ESP32-S3-RLCD-4.2 board, and mirrors the same
+state to a macOS menu bar app.
 
-A real-time token usage dashboard for [Qwen Code](https://github.com/QwenLM/qwen-code). An ESP32-S3 reflective LCD receives data from a Node.js BLE bridge and displays daily token consumption, model breakdown, active time, and more.
+The firmware is intentionally small and offline once flashed. The host bridge is
+where data-source support lives, so adding Codex, Qwen Code, Claude, or another
+agent usually means extending one JavaScript reader instead of touching the
+embedded UI.
 
+## What It Shows
+
+- Today token total and progress toward a 100M daily goal
+- Top 3 models used today
+- Sessions, active time, input/output tokens, cache rate, and last-7-days total
+- Temperature and humidity from the board's SHTC3 sensor
+- Battery percentage plus USB/external-power indicator
+- A second activity page toggled by the board KEY button:
+  - last 6 months activity grid
+  - lifetime tokens
+  - peak daily tokens
+  - current streak
+  - longest task
+
+Activity cells use five monochrome shades because the RLCD is effectively 1-bit:
+
+| Level | Meaning | Pattern |
+| --- | --- | --- |
+| 0 | `0` tokens | blank |
+| 1 | `(0, 1M)` | `░`, about 1/3 black |
+| 2 | `[1M, 10M)` | `▒`, 1/2 black |
+| 3 | `[10M, 100M)` | `▓`, about 2/3 black |
+| 4 | `[100M, +inf)` | `█`, all black |
+
+## Architecture
+
+```text
+Qwen Code / Codex logs
+        |
+        v
+bridge/src/index.js
+  - scans configured data sources
+  - aggregates daily + historical metrics
+  - writes /tmp/qwen-token-status.json
+  - pushes BLE v3 payload every second
+        |
+        v
+ESP32-S3 BLE GATT characteristic
+        |
+        v
+firmware
+  - NimBLE receiver
+  - LVGL UI
+  - SHTC3 / battery / KEY button tasks
+  - 1-bit RLCD flush with dithered activity shades
+        |
+        v
+400 x 300 reflective LCD
 ```
-Qwen Code sessions → .jsonl files → Bridge (Node.js)
-    → BLE write → ESP32 GATT → LVGL UI → 400×300 reflective LCD
-    → status JSON → macOS menu bar dashboard (SwiftUI)
+
+## Repository Layout
+
+```text
+.
+├── bridge/                 # Node.js BLE bridge and data-source readers
+│   ├── package.json
+│   └── src/index.js
+├── firmware/               # ESP-IDF project for ESP32-S3-RLCD-4.2
+│   ├── main/
+│   └── components/
+├── menubar/                # Optional macOS SwiftUI menu bar app
+│   ├── QwenBridgeBar.swift
+│   └── build.sh
+├── tools/lvgl_preview/     # Local LVGL framebuffer renderer
+├── AGENTS.md               # Notes for Codex/Claude/other coding agents
+└── README.zh-CN.md
 ```
 
 ## Hardware
 
-- [Waveshare ESP32-S3-RLCD-4.2](https://www.waveshare.net/wiki/ESP32-S3-RLCD-4.2)
-  - 400×300 reflective LCD (e-ink style, always-on, no backlight)
-  - Onboard SHTC3 temperature/humidity sensor
-  - USB-C for power & flashing
+Target board:
 
-## Project Structure
+- [Waveshare ESP32-S3-RLCD-4.2](https://www.waveshare.com/wiki/ESP32-S3-RLCD-4.2)
+- ESP32-S3 with BLE
+- 400 x 300 reflective LCD
+- Onboard SHTC3 temperature/humidity sensor
+- KEY button on GPIO 18
+- Battery ADC support in firmware
 
-```
-token-monitor-ble/
-├── firmware/          # ESP-IDF v5.x firmware
-│   ├── main/          # Entry point + config
-│   └── components/    # BLE, UI, sensor modules
-├── bridge/            # Node.js BLE bridge
-│   └── src/index.js   # Reads session files → BLE push + status JSON
-└── menubar/           # macOS menu bar dashboard (SwiftUI popover)
-    ├── QwenBridgeBar.swift
-    └── build.sh       # Compile to .app bundle
-```
+## Quick Start
 
-## Quick Start (New Device)
+### 1. Build And Flash Firmware
 
-### Step 1: Flash Firmware (ESP32, one-time)
+Prerequisites:
 
-**Prerequisites:** [ESP-IDF v5.x](https://dl.espressif.com/dl/esp-idf/) installed, Node.js (for auto font generation)
+- ESP-IDF v5.x
+- Node.js available on PATH, used by the font generation step
 
 ```bash
 cd firmware
-
-# Create secrets.h (BLE mode doesn't need real values, placeholders are fine)
 cp main/secrets.h.example main/secrets.h
-
-# Load ESP-IDF environment (adjust path to your installation)
 source ~/esp/esp-idf/export.sh
-
-# Build & flash (plug in USB-C first)
 idf.py set-target esp32s3
-
-# ⬇️ The one-line command: BLE name + greeting name + flash
-idf.py -DRLCD_BLE_DEVICE_NAME="QwenToken-YourName" -DRLCD_GREETING_NAME="你的名字" -p /dev/cu.usbmodem* build flash
+idf.py -DRLCD_GREETING_NAME="YourName" -DRLCD_BLE_DEVICE_NAME="QwenToken" -p /dev/cu.usbmodem* build flash
 ```
 
-After flashing, the screen lights up showing the `TOKENMAXXING` dashboard with the personalized greeting.
+Notes:
 
-#### How Greeting Names Work
+- `RLCD_GREETING_NAME` is optional. Leave it empty for a generic greeting.
+- CJK greeting glyphs are merged into the generated LVGL font during build.
+- Generated font files stay under `firmware/build/` and are not committed.
 
-The `-DRLCD_GREETING_NAME` flag does two things automatically:
+### 2. Run The Bridge
 
-1. **Font generation**: CMake runs `lv_font_conv` at build time, merging the greeting name's characters into the bitmap font. No manual font regeneration needed — the font file is generated in `build/` and never committed to the repo.
-2. **Compile-time injection**: The name is passed as a preprocessor macro, shown on the dashboard header (e.g. `山果，下午好～`).
+Prerequisites:
 
-- **English names** (e.g. "Robin") work out of the box — all ASCII letters are included by default.
-- **CJK names** (e.g. "高铁") are auto-merged into the font symbols — just pass the name and build.
-- The font source file (`font_zh18.c`) is `.gitignore`d and regenerated each build, so no user names are committed to the repo.
-
-> **Windows users:** See the Windows quick start section in [firmware/README.md](firmware/README.md).
-
-### Step 2: Start Bridge (Host Computer, on every boot)
-
-**Prerequisites:** Node.js v18–v22
-
-> **⚠️ macOS users: Do NOT run the bridge inside tmux or screen.** CoreBluetooth permissions are tied to the GUI login session and cannot be inherited by terminal multiplexers — the process will silently abort (exit code 134). Use a regular Terminal.app / iTerm2 window.
+- Node.js 18+
+- macOS for BLE bridge support via `@abandonware/noble`/CoreBluetooth
 
 ```bash
-# Install dependencies (first time only)
 cd bridge
 npm install
-
-# Start
-node src/index.js
+TOKEN_MONITOR_DATASOURCES=qwen,codex QWEN_BLE_DEVICE_NAME=QwenToken npm start
 ```
 
-When you see `[ble] ready` in the terminal, the connection is established and data starts flowing to the screen.
+Expected logs:
 
-### Step 3: Verify
-
-1. Left side shows daily token count with progress bar and Top 3 models
-2. Right side shows session count, active time, input/output tokens, cache rate, and 7-day total
-3. Header shows greeting, time, and indoor temperature/humidity
-
-## Screen Layout
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  山果，下午好～        06-09 14:30         26.5°C 62%           │
-├──────────────────────────────────────────────────────────────────┤
-│                                      │                           │
-│  TOKENMAXXING                        │  Today Sessions           │
-│                                      │  11                       │
-│  DAILY SMALL GOAL: 100M              │                           │
-│  2,000,000 Tokens                    │  Active Time              │
-│  [████░░░░░░░░░░░░░░░░░] 2.0%       │  1h27                     │
-│                                      │                           │
-│  Today Top3 Models                   │  Input Tokens             │
-│  qwen3-coder                  62%    │  4.2M                     │
-│  claude-opus-4                25%    │                           │
-│  deepseek-r1                  13%    │  Output Tokens            │
-│                                      │  0.8M                     │
-│  ─────────────────────────           │                           │
-│  QwenCode/Codex/Claude/Qoder/OpenClaw│  Cache Rate               │
-│                                      │  33%                      │
-│                                      │  ─────────────            │
-│                                      │  Last 7 Days              │
-│                                      │  28.8M                    │
-└──────────────────────────────────────┴───────────────────────────┘
+```text
+[ble] adapter state: poweredOn
+[ble] scanning for QwenToken
+[ble] connecting QwenToken
+[ble] ready
+[ble] wrote 3|...
 ```
 
-## Data Source
+The bridge also writes:
 
-The bridge scans `~/.qwen/projects/*/chats/*.jsonl` (Qwen Code session logs),
-extracts `usageMetadata` to aggregate token usage, and pushes it to the ESP32 via BLE every second.
-
-## BLE Protocol
-
-Device name: `QwenToken`. Uses custom 128-bit UUIDs for GATT Service/Characteristic.
-Payload is `|`-delimited text (v3 format):
-
-```
-3|todayTotal|sessions|cached|cacheRate|activeMin|updatedAt|model1|pct1|model2|pct2|model3|pct3|errors|ageSec|output|weekTotal|input
+```text
+/tmp/qwen-token-status.json
 ```
 
-## Environment Variables (Bridge)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `QWEN_BLE_PUSH_MS` | 1000 | Push interval in milliseconds |
-| `QWEN_BLE_SCAN_DAYS` | 7 | Scan session files from the last N days |
-| `QWEN_BLE_TAIL_BYTES` | 2097152 | Tail bytes to read per session file |
-| `TOKEN_MONITOR_DATASOURCES` | `qwen` | Comma-separated data sources to aggregate, e.g. `qwen,codex` |
-| `CODEX_HOME` | `~/.codex` | Codex home directory used by the `codex` data source |
-| `CODEX_SESSIONS_DIR` | `$CODEX_HOME/sessions` | Codex rollout directory scanned by the `codex` data source |
-| `CODEX_STATE_DB` | `$CODEX_HOME/state_5.sqlite` | Codex state database used for thread model names |
-
-## Notes
-
-- macOS will prompt for Bluetooth permission on first Bridge run — allow it
-- Bridge must run in a **terminal with Bluetooth access** (iTerm / Terminal.app), not in sandboxed environments
-- Keep ESP32 within 10m of the host computer
-- First build downloads LVGL (~50MB) via IDF Component Manager — requires internet
-
-## macOS Menu Bar Dashboard (Optional)
-
-A SwiftUI menu bar app that mirrors the ESP32 dashboard — shows the same token data in a native macOS popover, plus BLE/Bridge status and controls.
-
-### How it works
-
-The bridge writes a status JSON file (`/tmp/qwen-token-status.json`) every second with the full token report and BLE connection state. The menu bar app reads this file and renders it via SwiftUI.
-
-### Build & Run
+### 3. Optional macOS Menu Bar App
 
 ```bash
 cd menubar
-bash build.sh
+bash build.sh dmg
 open QwenBridgeBar.app
 ```
 
-Click the **QC** menu bar item to open the dashboard popover. The popover shows:
+The app bundles the bridge script and `node_modules`, starts the bridge as a
+child process, reads `/tmp/qwen-token-status.json`, and can register itself as a
+Login Item on macOS 13+.
 
-- Today's token count + progress toward the 100M goal
-- Top 3 models with percentages
-- Sessions, active time, input/output tokens, cache rate, 7-day total
-- BLE connection status (connected device name / scanning)
-- Bridge process status (running / stopped)
-- Start / Stop / Restart / Open Log controls
+The generated DMG is:
 
-### Auto-launch (optional)
+```text
+menubar/QwenBridgeBar.dmg
+```
 
-Add the compiled `.app` to **System Settings → General → Login Items** to launch on boot.
+## Bridge Data Sources
+
+Configure data sources with:
+
+```bash
+TOKEN_MONITOR_DATASOURCES=qwen,codex
+```
+
+Supported readers:
+
+| Source | What it scans |
+| --- | --- |
+| `qwen` | monthly Qwen usage JSONL files under the Qwen runtime usage directory |
+| `codex` | Codex rollout JSONL files under `$CODEX_HOME/sessions` |
+
+Important environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TOKEN_MONITOR_DATASOURCES` | `qwen` | Comma-separated sources to aggregate |
+| `TOKEN_MONITOR_HISTORY_DAYS` | `3650` | History window used for lifetime, peak, streak, and longest task |
+| `QWEN_BLE_DEVICE_NAME` | `QwenToken,Qwen Usage` | Comma-separated BLE names to connect to |
+| `QWEN_BLE_PUSH_MS` | `1000` | BLE push interval |
+| `QWEN_BLE_SCAN_DAYS` | `7` | Recent window for week/current metrics |
+| `QWEN_RUNTIME_DIR` | derived from `~/.qwen/.env` | Qwen runtime directory |
+| `CODEX_HOME` | `~/.codex` | Codex home directory |
+| `CODEX_SESSIONS_DIR` | `$CODEX_HOME/sessions` | Codex session rollout directory |
+| `CODEX_STATE_DB` | `$CODEX_HOME/state_5.sqlite` | Optional Codex thread model-name lookup |
+
+## BLE Protocol
+
+Service UUID:
+
+```text
+00112233-4455-6677-8899-aabbccddeeff
+```
+
+Writable characteristic UUID:
+
+```text
+00112233-4455-6677-8899-aabbccddee01
+```
+
+Payload format is pipe-delimited text. Current format is version `3`:
+
+```text
+3|todayTotal|sessionsToday|todayCached|cacheRate|activeMinutes|updatedAt|
+model1|model1Pct|model2|model2Pct|model3|model3Pct|
+errorsToday|ageSec|todayOutput|weekTotal|todayInput|
+activity|lifetimeTotal|peakDailyTotal|streakDays|longestTaskMinutes
+```
+
+The `activity` field is 104 base36 characters:
+
+- 26 columns
+- 7 rows per column
+- one 4-character packed base36 chunk per column
+- row order is Sunday through Saturday
+- each cell is a base-5 level from `0` to `4`
+
+The firmware keeps v1/v2 parsing for backward compatibility, but new bridges
+should emit v3.
+
+## Firmware UI Notes
+
+- Main page: token dashboard plus sensor and battery status.
+- Activity page: press the board KEY button to toggle.
+- The RLCD output is 1-bit. Activity "shades" are not true grayscale; they are
+  generated in `firmware/main/main.cpp` during LVGL flush using 10 x 10 cell
+  dithering.
+- UI layout lives in `firmware/components/ui_app/ui_app.cpp`.
+- BLE parsing lives in `firmware/components/ble_app/ble_app.c`.
+- Shared report schema lives in `firmware/components/usage_client/usage_client.h`.
+
+## Local LVGL Preview
+
+The preview renders the LVGL UI to framebuffer files without flashing hardware.
+Run a firmware build once first so `font_zh18.c` exists.
+
+```bash
+cd tools/lvgl_preview
+bash render.sh
+```
+
+Outputs:
+
+```text
+outputs/lvgl-preview/dashboard.ppm
+outputs/lvgl-preview/activity.ppm
+```
+
+Convert to PNG on macOS:
+
+```bash
+sips -s format png outputs/lvgl-preview/activity.ppm --out outputs/lvgl-preview/activity.png
+```
+
+## Adding A New Data Source
+
+Most new agent integrations only require bridge changes:
+
+1. Add a reader function in `bridge/src/index.js`.
+2. Return an `emptyTotals(sourceName)` shaped object.
+3. Fill:
+   - today totals
+   - model totals
+   - session events for active time
+   - task events for longest task
+   - daily totals for activity/lifetime/peak/streak
+   - latest call metadata
+4. Register it in the `readers` map inside `buildReport()`.
+5. Run the bridge with `TOKEN_MONITOR_DATASOURCES=yourSource`.
+
+If the BLE payload fields do not change, firmware does not need to be touched.
 
 ## Troubleshooting
 
-### Screen is on but no data
+### The bridge scans forever
 
-**Check if Bridge is running:**
+- Make sure the flashed BLE name matches `QWEN_BLE_DEVICE_NAME`.
+- Keep the board powered and within BLE range.
+- BLE devices may not appear in macOS Bluetooth Settings; use bridge logs.
 
-```bash
-tail -10 /tmp/qwen-token-ble-bridge.log
+### The bridge exits immediately on macOS
 
-# [ble] wrote ... → bridge is pushing data
-# [ble] scanning for QwenToken → not yet connected
-```
+Run it from a normal Terminal.app or iTerm2 window. CoreBluetooth can fail in
+detached shells, terminal multiplexers, or sandboxed launch contexts.
 
-**Check if the BLE device is visible:**
+### The screen shows no data after flashing
 
-```bash
-# macOS built-in (no install needed)
-system_profiler SPBluetoothDataType 2>/dev/null | grep -A5 "QwenToken"
+Start the bridge again. Flashing resets BLE, so the host bridge may need to
+reconnect.
 
-# Or scan with Python bleak (shows signal strength)
-pip3 install bleak
-python3 -c "
-import asyncio
-from bleak import BleakScanner
-async def scan():
-    devices = await BleakScanner.discover(timeout=5)
-    for d in sorted(devices, key=lambda x: x.rssi, reverse=True):
-        if d.name:
-            print(f'{d.rssi:>4}dBm  {d.name:<20} {d.address}')
-asyncio.run(scan())
-"
-```
+### Activity shades look like binary black/white
 
-> **Note:** BLE devices do NOT appear in macOS System Preferences → Bluetooth (that only shows classic Bluetooth). Use the commands above.
+That is expected. The panel is driven as 1-bit. The five visual levels are
+dithered patterns, not true grayscale.
 
-### Bridge connects to wrong device (multiple devices)
+## Privacy
 
-All devices advertise as `QwenToken`. Bridge connects to whichever it discovers first.
-
-1. Power off the unwanted device (unplug USB-C)
-2. `Ctrl+C` the bridge, then restart `node src/index.js`
-3. Bridge will rescan and connect to the only online device
-
-### How to power off the device
-
-- **The Waveshare ESP32-S3-RLCD-4.2 has no power switch** — just unplug USB-C
-- If the device has a battery, simply remove it. Cutting power to ESP32 will not damage hardware or data
-- BLE disconnect may take a few seconds after power-off; Bridge will auto-detect and rescan
-
-### idf.py not found
-
-```bash
-# Load ESP-IDF environment (needed for each new terminal session)
-source ~/esp/esp-idf/export.sh
-
-# If idf.py is still not found, call it via Python directly
-python3 ~/esp/esp-idf/tools/idf.py build
-```
-
-### Bridge exits immediately (exit code 134 / abort)
-
-On macOS, `@abandonware/noble` uses CoreBluetooth native bindings. The process will silently `abort()` if it cannot access the Bluetooth subsystem. The most common cause is **running inside tmux / screen** — these multiplexers create sessions detached from the macOS GUI login session, so the Bluetooth TCC (privacy) permission is not inherited.
-
-**Fix:** Run the bridge in a regular Terminal.app / iTerm2 window (not inside tmux or screen):
-
-```bash
-cd bridge
-node src/index.js
-```
-
-> **Tip:** If you need tmux for other work, just keep one standalone terminal tab for the bridge.
-
-Other possible causes:
-- First run — macOS will prompt for Bluetooth permission; make sure to click **Allow**
-- Running in a sandboxed IDE terminal (some VS Code configurations) — try a standalone terminal instead
+The bridge reads local usage logs and sends aggregate metrics over BLE. It does
+not upload data to any remote service. Avoid committing local exports, generated
+build output, status JSON files, logs, or personal greeting names.

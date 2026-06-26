@@ -110,13 +110,58 @@ class StatusManager: ObservableObject {
 
     private var timer: Timer?
     private var bridgeProcess: Process?
+    private var bridgeShouldRun = false
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     func start() {
+        ensureLaunchAtLogin()
+        installPowerObservers()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in self.refresh() }
     }
 
-    func stop() { timer?.invalidate() }
+    func stop() {
+        bridgeShouldRun = false
+        timer?.invalidate()
+        removePowerObservers()
+    }
+
+    private func installPowerObservers() {
+        guard sleepObserver == nil && wakeObserver == nil else { return }
+        let center = NSWorkspace.shared.notificationCenter
+        sleepObserver = center.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("[power] will sleep, stopping bridge")
+            self?.doStop()
+        }
+        wakeObserver = center.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            print("[power] did wake, restarting bridge")
+            self?.bridgeShouldRun = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                self?.doStart()
+            }
+        }
+    }
+
+    private func removePowerObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        if let sleepObserver {
+            center.removeObserver(sleepObserver)
+            self.sleepObserver = nil
+        }
+        if let wakeObserver {
+            center.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
+    }
 
     private func refresh() {
         // Read status file
@@ -139,6 +184,7 @@ class StatusManager: ObservableObject {
     }
 
     func doStart() {
+        bridgeShouldRun = true
         guard bridgeProcess?.isRunning != true else { return }
         guard let nodePath = findNode() else { return }
         guard let scriptPath = bridgeScriptPath() else { return }
@@ -150,9 +196,8 @@ class StatusManager: ObservableObject {
 
         // Pass BLE device name as env var
         var env = ProcessInfo.processInfo.environment
-        if !bleDeviceName.isEmpty {
-            env["QWEN_BLE_DEVICE_NAME"] = bleDeviceName
-        }
+        env["TOKEN_MONITOR_DATASOURCES"] = env["TOKEN_MONITOR_DATASOURCES"] ?? "qwen,codex"
+        env["QWEN_BLE_DEVICE_NAME"] = bleDeviceName.isEmpty ? "QwenToken" : bleDeviceName
         process.environment = env
 
         // Redirect stdout/stderr to log file via pipe
@@ -168,8 +213,14 @@ class StatusManager: ObservableObject {
 
         process.terminationHandler = { [weak self] _ in
             DispatchQueue.main.async {
+                let shouldRestart = self?.bridgeShouldRun ?? false
                 self?.bridgeProcess = nil
                 self?.refresh()
+                if shouldRestart {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        self?.doStart()
+                    }
+                }
             }
         }
 
@@ -184,6 +235,7 @@ class StatusManager: ObservableObject {
     }
 
     func doStop() {
+        bridgeShouldRun = false
         guard let process = bridgeProcess, process.isRunning else { return }
         // Send SIGTERM for clean BLE disconnect
         kill(process.processIdentifier, SIGTERM)
@@ -198,6 +250,7 @@ class StatusManager: ObservableObject {
     }
 
     func doRestart() {
+        bridgeShouldRun = false
         doStop()
         Thread.sleep(forTimeInterval: 1)
         doStart()
@@ -220,6 +273,19 @@ class StatusManager: ObservableObject {
                 }
             } catch {
                 print("[launch] failed: \(error)")
+            }
+        }
+    }
+
+    func ensureLaunchAtLogin() {
+        if #available(macOS 13.0, *) {
+            do {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+                launchAtLogin = SMAppService.mainApp.status == .enabled
+            } catch {
+                print("[launch] auto-register failed: \(error)")
             }
         }
     }
@@ -440,9 +506,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let btn = statusItem.button {
-            btn.title = "QC"
+            btn.title = "RLCD"
+            btn.toolTip = "TokenMaxxing RLCD Bridge"
             btn.action = #selector(togglePopover)
             btn.target = self
         }

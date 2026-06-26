@@ -14,7 +14,7 @@ add_compile_definitions(
     LV_CONF_PATH="${CMAKE_CURRENT_LIST_DIR}/lv_conf.h"
     LV_LVGL_H_INCLUDE_SIMPLE
     LV_KCONFIG_IGNORE
-    RLCD_GREETING_NAME="玟渊"
+    RLCD_GREETING_NAME=""
 )
 
 file(GLOB LVGL_CORE_SOURCES

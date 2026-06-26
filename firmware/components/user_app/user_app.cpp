@@ -22,6 +22,7 @@ static const char *TAG = "user_app";
 #define USER_KEY_GPIO GPIO_NUM_18
 #define USER_KEY_POLL_MS 20
 #define USER_KEY_DEBOUNCE_SAMPLES 3
+#define CLOCK_REFRESH_MS 1000
 
 static int smooth_battery_percent(int raw_percent, bool usb_connected)
 {
@@ -123,6 +124,18 @@ static void key_task(void *arg)
     }
 }
 
+static void clock_task(void *arg)
+{
+    (void) arg;
+    for (;;) {
+        if (Lvgl_lock(200)) {
+            ui_app_refresh_clock();
+            Lvgl_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(CLOCK_REFRESH_MS));
+    }
+}
+
 static void key_init(void)
 {
     gpio_config_t cfg = {
@@ -153,4 +166,5 @@ void UserApp_TaskInit(void)
     ESP_ERROR_CHECK(ble_app_init(on_ble_data));
     xTaskCreatePinnedToCore(env_task, "env", 4 * 1024, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(key_task, "key", 2 * 1024, NULL, 4, NULL, 1);
+    xTaskCreatePinnedToCore(clock_task, "clock", 2 * 1024, NULL, 2, NULL, 1);
 }

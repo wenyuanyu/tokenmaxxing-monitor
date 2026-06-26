@@ -14,8 +14,13 @@ const SERVICE_UUID = '00112233445566778899aabbccddeeff';
 const DATA_CHAR_UUID = '00112233445566778899aabbccddee01';
 const INTERVAL_MS = Number(process.env.QWEN_BLE_PUSH_MS ?? 1000);
 const RECENT_DAYS = Number(process.env.QWEN_BLE_SCAN_DAYS ?? 7);
+const ACTIVITY_DAYS = 26 * 7;
+const HISTORY_DAYS = Number(process.env.TOKEN_MONITOR_HISTORY_DAYS ?? 3650);
 const ACTIVE_GAP_MS = 5 * 60 * 1000;
 const STATUS_FILE = '/tmp/qwen-token-status.json';
+const WRITE_TIMEOUT_MS = Number(process.env.QWEN_BLE_WRITE_TIMEOUT_MS ?? 3000);
+const STALE_WRITE_MS = Number(process.env.QWEN_BLE_STALE_WRITE_MS ?? 10000);
+const WAKE_GAP_MS = Number(process.env.QWEN_BLE_WAKE_GAP_MS ?? 15000);
 const DATA_SOURCE_NAMES = [
   ...new Set(
     (process.env.TOKEN_MONITOR_DATASOURCES ?? process.env.QWEN_BLE_DATASOURCES ?? 'qwen')
@@ -32,6 +37,24 @@ let connectedPeripheral = null;
 let scanTimer = null;
 let pushTimer = null;
 let connecting = false;
+let pushInFlight = false;
+let lastTickAt = 0;
+let lastSuccessfulWriteAt = 0;
+
+function resetBleConnection(reason) {
+  if (reason) console.error(`[ble] resetting connection: ${reason}`);
+  dataChar = null;
+  bleConnected = false;
+  bleDevice = '';
+  connecting = false;
+  lastSuccessfulWriteAt = 0;
+  const peripheral = connectedPeripheral;
+  connectedPeripheral = null;
+  if (peripheral) {
+    try { peripheral.disconnect(); } catch {}
+  }
+  startScan();
+}
 
 function parseEnvFile(file) {
   try {
@@ -56,7 +79,7 @@ function runtimeDir() {
 
 function usageFiles() {
   const dir = path.join(runtimeDir(), 'usage');
-  const cutoff = Date.now() - (RECENT_DAYS + 1) * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - (Math.max(RECENT_DAYS, ACTIVITY_DAYS, HISTORY_DAYS) + 1) * 24 * 60 * 60 * 1000;
   const files = [];
   try {
     if (!fs.existsSync(dir)) return files;
@@ -78,7 +101,7 @@ function codexHome() {
 
 function codexSessionFiles() {
   const root = process.env.CODEX_SESSIONS_DIR ?? path.join(codexHome(), 'sessions');
-  const cutoff = Date.now() - (RECENT_DAYS + 1) * 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - (Math.max(RECENT_DAYS, ACTIVITY_DAYS, HISTORY_DAYS) + 1) * 24 * 60 * 60 * 1000;
   const files = [];
 
   const walk = (dir) => {
@@ -123,6 +146,14 @@ function formatStamp(ms) {
   return `${mm}-${dd} ${hh}:${mi}:${ss}`;
 }
 
+function localDateKey(ms) {
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 function modelName(rec) {
   return String(rec.model ?? 'qwen').replace(/[|\r\n]/g, ' ').trim().slice(0, 23) || 'qwen';
 }
@@ -141,6 +172,45 @@ function activeMinutes(sessionEvents) {
     }
   }
   return Math.round(activeMs / 60000);
+}
+
+function longestTaskMinutes(taskEvents) {
+  let longestMs = 0;
+  for (const events of taskEvents.values()) {
+    events.sort((a, b) => a - b);
+    let startedAt = null;
+    let previous = null;
+    for (const ts of events) {
+      if (!Number.isFinite(ts)) continue;
+      if (startedAt === null || previous === null || ts - previous > ACTIVE_GAP_MS) {
+        startedAt = ts;
+      } else {
+        const span = ts - startedAt;
+        if (span > longestMs) longestMs = span;
+      }
+      previous = ts;
+    }
+  }
+  return Math.round(longestMs / 60000);
+}
+
+function streakDays(dailyTotals) {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  let streak = 0;
+  while ((dailyTotals.get(localDateKey(d.getTime())) ?? 0) > 0) {
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+function peakDailyTotal(dailyTotals) {
+  let peak = 0;
+  for (const total of dailyTotals.values()) {
+    if (total > peak) peak = total;
+  }
+  return peak;
 }
 
 function topModels(modelTotals, todayTotal) {
@@ -165,6 +235,7 @@ function todayInfo() {
     todayStartMs: today.getTime(),
     todayDateStr: `${yyyy}-${mm}-${dd}`,
     weekCutoffMs: Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000,
+    activityCutoffMs: today.getTime() - (ACTIVITY_DAYS - 1) * 24 * 60 * 60 * 1000,
   };
 }
 
@@ -181,9 +252,17 @@ function emptyTotals(source = 'aggregate') {
     weekTotal: 0,
     todaySessions: new Set(),
     sessionEvents: new Map(),
+    taskEvents: new Map(),
     modelTotals: new Map(),
+    dailyTotals: new Map(),
     latest: null,
   };
+}
+
+function addDailyTokens(totals, dateKey, tokens) {
+  const n = Number(tokens ?? 0);
+  if (!dateKey || !Number.isFinite(n) || n <= 0) return;
+  totals.dailyTotals.set(dateKey, (totals.dailyTotals.get(dateKey) ?? 0) + n);
 }
 
 function addSessionEvent(totals, key, ts) {
@@ -191,6 +270,13 @@ function addSessionEvent(totals, key, ts) {
   const events = totals.sessionEvents.get(key) ?? [];
   events.push(ts);
   totals.sessionEvents.set(key, events);
+}
+
+function addTaskEvent(totals, key, ts) {
+  if (!Number.isFinite(ts)) return;
+  const events = totals.taskEvents.get(key) ?? [];
+  events.push(ts);
+  totals.taskEvents.set(key, events);
 }
 
 function setLatest(totals, latest) {
@@ -217,8 +303,17 @@ function mergeTotals(target, source) {
     existing.push(...events);
     target.sessionEvents.set(key, existing);
   }
+  for (const [session, events] of source.taskEvents) {
+    const key = `${source.source}:${session}`;
+    const existing = target.taskEvents.get(key) ?? [];
+    existing.push(...events);
+    target.taskEvents.set(key, existing);
+  }
   for (const [model, total] of source.modelTotals) {
     target.modelTotals.set(model, (target.modelTotals.get(model) ?? 0) + total);
+  }
+  for (const [dateKey, total] of source.dailyTotals) {
+    addDailyTokens(target, dateKey, total);
   }
   setLatest(target, source.latest);
 }
@@ -248,6 +343,12 @@ function qwenReport() {
       const ts = Date.parse(rec.timestamp ?? '');
       const isToday = rec.localDate === todayDateStr;
       const isWeek = Number.isFinite(ts) && ts >= weekCutoffMs;
+      const totalTokens = rec.totalTokens ?? 0;
+      if (Number.isFinite(ts) && totalTokens > 0) {
+        const key = String(rec.sessionId ?? file);
+        addTaskEvent(totals, key, ts);
+        addDailyTokens(totals, rec.localDate || localDateKey(ts), totalTokens);
+      }
 
       if (isToday) {
         totals.callsToday++;
@@ -255,24 +356,24 @@ function qwenReport() {
         if (rec.sessionId) totals.todaySessions.add(rec.sessionId);
         addSessionEvent(totals, key, ts);
 
-        totals.todayTotal += rec.totalTokens ?? 0;
+        totals.todayTotal += totalTokens;
         totals.todayInput += rec.inputTokens ?? 0;
         totals.todayOutput += rec.outputTokens ?? 0;
         totals.todayCached += rec.cachedTokens ?? 0;
         totals.todayThought += rec.thoughtsTokens ?? 0;
 
         const model = modelName(rec);
-        totals.modelTotals.set(model, (totals.modelTotals.get(model) ?? 0) + (rec.totalTokens ?? 0));
+        totals.modelTotals.set(model, (totals.modelTotals.get(model) ?? 0) + totalTokens);
       }
 
       if (isWeek) {
-        totals.weekTotal += rec.totalTokens ?? 0;
+        totals.weekTotal += totalTokens;
       }
 
       setLatest(totals, {
         ts,
         input: rec.inputTokens ?? 0,
-        total: rec.totalTokens ?? 0,
+        total: totalTokens,
         model: modelName(rec),
       });
     }
@@ -362,6 +463,10 @@ function codexReport() {
       previousUsage = currentUsage;
       const isToday = ts >= todayStartMs;
       const isWeek = ts >= weekCutoffMs;
+      if (delta.total > 0) {
+        addTaskEvent(totals, threadId, ts);
+        addDailyTokens(totals, localDateKey(ts), delta.total);
+      }
 
       if (isToday && delta.total > 0) {
         totals.callsToday++;
@@ -392,10 +497,44 @@ function codexReport() {
   return totals;
 }
 
+function activityLevel(tokens) {
+  if (tokens === 0) return 0;
+  if (tokens < 1000000) return 1;
+  if (tokens < 10000000) return 2;
+  if (tokens < 100000000) return 3;
+  return 4;
+}
+
+function encodeActivityColumn(levels) {
+  let packed = 0;
+  let mul = 1;
+  for (const level of levels) {
+    packed += activityLevel(level) * mul;
+    mul *= 5;
+  }
+  return packed.toString(36).padStart(4, '0');
+}
+
+function activityPayload(dailyTotals) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const cells = Array.from({ length: 26 }, () => Array(7).fill(0));
+
+  for (let age = 0; age < ACTIVITY_DAYS; age++) {
+    const d = new Date(today.getTime() - age * 24 * 60 * 60 * 1000);
+    const col = 25 - Math.floor(age / 7);
+    const row = d.getDay();
+    cells[col][row] = dailyTotals.get(localDateKey(d.getTime())) ?? 0;
+  }
+
+  return cells.map(encodeActivityColumn).join('');
+}
+
 function finalizeReport(totals, sourceNames) {
   const now = Date.now();
   const latestTs = totals.latest?.ts ?? now;
   const models = topModels(totals.modelTotals, totals.todayTotal);
+  const lifetimeTotal = [...totals.dailyTotals.values()].reduce((sum, n) => sum + n, 0);
   return {
     todayTotal: totals.todayTotal,
     ctxPct: 0,
@@ -415,7 +554,12 @@ function finalizeReport(totals, sourceNames) {
     updatedAt: formatStamp(now),
     ageSec: Math.max(0, Math.round((now - latestTs) / 1000)),
     weekTotal: totals.weekTotal,
+    lifetimeTotal,
+    peakDailyTotal: peakDailyTotal(totals.dailyTotals),
+    streakDays: streakDays(totals.dailyTotals),
+    longestTaskMinutes: longestTaskMinutes(totals.taskEvents),
     sources: sourceNames,
+    activity: activityPayload(totals.dailyTotals),
   };
 }
 
@@ -465,6 +609,11 @@ function toPayload(r) {
     r.todayOutput,
     r.weekTotal,
     r.todayInput,
+    r.activity,
+    r.lifetimeTotal,
+    r.peakDailyTotal,
+    r.streakDays,
+    r.longestTaskMinutes,
   ].join('|');
 }
 
@@ -483,14 +632,36 @@ function writeStatusFile(report) {
 }
 
 async function pushTick() {
+  if (pushInFlight) return;
+  pushInFlight = true;
+  const startedAt = Date.now();
+  if (lastTickAt && startedAt - lastTickAt > WAKE_GAP_MS) {
+    resetBleConnection(`timer gap ${startedAt - lastTickAt}ms`);
+  }
+  lastTickAt = startedAt;
   const report = buildReport();
   writeStatusFile(report);
-  if (!dataChar) return;
-  const payload = toPayload(report);
-  await new Promise((resolve, reject) => {
-    dataChar.write(Buffer.from(payload), false, (err) => err ? reject(err) : resolve());
-  });
-  console.log(`[ble] wrote ${payload}`);
+  try {
+    if (!dataChar) return;
+    if (lastSuccessfulWriteAt && startedAt - lastSuccessfulWriteAt > STALE_WRITE_MS) {
+      resetBleConnection(`stale write ${startedAt - lastSuccessfulWriteAt}ms`);
+      return;
+    }
+    const payload = toPayload(report);
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('write timeout')), WRITE_TIMEOUT_MS);
+      dataChar.write(Buffer.from(payload), false, (err) => {
+        clearTimeout(timeout);
+        err ? reject(err) : resolve();
+      });
+    });
+    lastSuccessfulWriteAt = Date.now();
+    console.log(`[ble] wrote ${payload}`);
+  } catch (err) {
+    resetBleConnection(err.message);
+  } finally {
+    pushInFlight = false;
+  }
 }
 
 function startPushLoop() {
@@ -516,6 +687,7 @@ async function discoverCharacteristic(peripheral) {
 function connect(peripheral) {
   if (connecting || dataChar) return;
   connecting = true;
+  clearTimeout(scanTimer);
   noble.stopScanning();
   console.log(`[ble] connecting ${peripheral.advertisement.localName ?? peripheral.id}`);
 
@@ -546,6 +718,7 @@ function connect(peripheral) {
     try {
       dataChar = await discoverCharacteristic(peripheral);
       bleConnected = true;
+      lastSuccessfulWriteAt = 0;
       console.log('[ble] ready');
     } catch (e) {
       console.error('[ble] discover failed:', e.message);
@@ -558,6 +731,11 @@ function connect(peripheral) {
 function startScan() {
   if (dataChar || connecting) return;
   clearTimeout(scanTimer);
+  if (noble.state !== 'poweredOn') {
+    console.error(`[ble] scan deferred, adapter state: ${noble.state}`);
+    scanTimer = setTimeout(startScan, 5000);
+    return;
+  }
   console.log(`[ble] scanning for ${[...BLE_DEVICE_NAMES].join(' or ')}`);
   try {
     noble.startScanning([], false);
@@ -573,7 +751,15 @@ function startScan() {
 noble.on('stateChange', (state) => {
   console.log(`[ble] adapter state: ${state}`);
   if (state === 'poweredOn') startScan();
-  else noble.stopScanning();
+  else {
+    dataChar = null;
+    connectedPeripheral = null;
+    bleConnected = false;
+    connecting = false;
+    lastSuccessfulWriteAt = 0;
+    clearTimeout(scanTimer);
+    noble.stopScanning();
+  }
 });
 
 noble.on('discover', (peripheral) => {
@@ -600,3 +786,11 @@ function shutdown() {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+process.on('SIGCONT', () => {
+  console.error('[process] resumed, resetting BLE connection');
+  resetBleConnection('process resume');
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[process] unhandled rejection:', err?.message ?? err);
+  resetBleConnection('unhandled rejection');
+});

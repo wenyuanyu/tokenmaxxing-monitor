@@ -22,7 +22,11 @@ typedef struct {
     int64_t cache_total;
     int64_t thought_total;
     int64_t week_total;
+    int64_t lifetime_total;
+    int64_t peak_daily_total;
     int32_t age_sec;
+    int32_t streak_days;
+    int32_t longest_task_minutes;
     char model[24];
     char model_1[24];
     char model_2[24];
@@ -31,6 +35,7 @@ typedef struct {
     int32_t model_2_pct;
     int32_t model_3_pct;
     char updated_at[16];
+    uint8_t activity_levels[26][7];
     bool valid;
 } usage_report_t;
 

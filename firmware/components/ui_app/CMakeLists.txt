@@ -2,7 +2,7 @@ idf_component_register(
     SRCS "ui_app.cpp" "font_amt14.c"
     INCLUDE_DIRS "./"
     REQUIRES lvgl__lvgl usage_client
-    PRIV_REQUIRES app_bsp
+    PRIV_REQUIRES app_bsp esp_timer
 )
 
 # lv_font_conv output uses #include "lvgl.h" only under this define

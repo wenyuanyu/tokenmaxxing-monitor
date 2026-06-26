@@ -24,7 +24,7 @@ static const char *DEVICE_NAME = RLCD_BLE_DEVICE_NAME;
 
 static ble_data_cb_t s_data_cb;
 static uint8_t s_own_addr_type;
-static char s_last_payload[256] = "3|0|0|0|0|0|-- --:--|--|0|--|0|--|0|0|0";
+static char s_last_payload[384] = "3|0|0|0|0|0|-- --:--|--|0|--|0|--|0|0|0";
 
 static const ble_uuid128_t SVC_UUID =
     BLE_UUID128_INIT(0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88,
@@ -65,6 +65,34 @@ static bool next_str(char **save, char *out, size_t out_size)
     return true;
 }
 
+static int base36_value(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+    return -1;
+}
+
+static void parse_activity_levels(const char *field, usage_report_t *out)
+{
+    if (!field) return;
+    size_t len = strlen(field);
+    if (len < 26 * 4) return;
+
+    for (int col = 0; col < 26; col++) {
+        uint32_t packed = 0;
+        for (int i = 0; i < 4; i++) {
+            int v = base36_value(field[col * 4 + i]);
+            if (v < 0) return;
+            packed = packed * 36 + (uint32_t)v;
+        }
+        for (int row = 0; row < 7; row++) {
+            out->activity_levels[col][row] = packed % 5;
+            packed /= 5;
+        }
+    }
+}
+
 static bool parse_payload_v3(char *line, usage_report_t *out)
 {
     char *save = NULL;
@@ -90,6 +118,11 @@ static bool parse_payload_v3(char *line, usage_report_t *out)
     next_i64(&save, &out->output_total);
     next_i64(&save, &out->week_total);
     next_i64(&save, &out->input_total);
+    parse_activity_levels(strtok_r(NULL, "|", &save), out);
+    next_i64(&save, &out->lifetime_total);
+    next_i64(&save, &out->peak_daily_total);
+    next_i32(&save, &out->streak_days);
+    next_i32(&save, &out->longest_task_minutes);
 
     out->cache_rate = clamp_pct(out->cache_rate);
     out->model_1_pct = clamp_pct(out->model_1_pct);
@@ -98,6 +131,10 @@ static bool parse_payload_v3(char *line, usage_report_t *out)
     if (out->active_minutes < 0) out->active_minutes = 0;
     if (out->errors_today < 0) out->errors_today = 0;
     if (out->age_sec < 0) out->age_sec = 0;
+    if (out->lifetime_total < 0) out->lifetime_total = 0;
+    if (out->peak_daily_total < 0) out->peak_daily_total = 0;
+    if (out->streak_days < 0) out->streak_days = 0;
+    if (out->longest_task_minutes < 0) out->longest_task_minutes = 0;
     out->valid = true;
     return true;
 }

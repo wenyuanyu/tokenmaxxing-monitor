@@ -4,8 +4,12 @@
 <dict>
     <key>CFBundleName</key>
     <string>QwenBridgeBar</string>
+    <key>CFBundleExecutable</key>
+    <string>QwenBridgeBar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.pomelo.qwen-bridge-bar</string>
+    <string>io.github.tokenmaxxing.rlcd-bridge-bar</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>

@@ -31,6 +31,7 @@ static lv_obj_t *lbl_input;
 static lv_obj_t *lbl_output;
 static lv_obj_t *lbl_rate;
 static lv_obj_t *lbl_week;
+static lv_obj_t *lbl_battery;
 static lv_obj_t *bar_goal;
 static lv_obj_t *lbl_goal;
 
@@ -218,8 +219,11 @@ void ui_app_init(void)
     /* ── horizontal divider ── */
     divider(s, 282, 226, 100, 1);
 
-    label(s, 282, 234, &lv_font_montserrat_12, "Last 7 Days");
-    lbl_week = label(s, 282, 248, &lv_font_montserrat_16, "--");
+    label(s, 282, 232, &lv_font_montserrat_12, "Last 7 Days");
+    lbl_week = label(s, 282, 246, &lv_font_montserrat_16, "--");
+
+    label(s, 282, 264, &lv_font_montserrat_12, "Battery");
+    lbl_battery = label(s, 282, 278, &lv_font_montserrat_16, "USB/--");
 }
 
 void ui_app_update(const usage_report_t *r)
@@ -290,6 +294,11 @@ void ui_app_set_env(float temp_c, float humidity, bool ok)
         snprintf(b, sizeof(b), "env --.-C --%%");
     }
     lv_label_set_text(lbl_env, b);
+}
+
+void ui_app_set_battery(const char *status)
+{
+    lv_label_set_text(lbl_battery, (status && status[0]) ? status : "USB/--");
 }
 
 void ui_app_set_time(const char *hm)

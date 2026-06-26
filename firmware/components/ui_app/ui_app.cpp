@@ -5,7 +5,7 @@
 #include <string.h>
 
 #ifndef RLCD_GREETING_NAME
-#define RLCD_GREETING_NAME "Wenyuan"
+#define RLCD_GREETING_NAME "玟渊"
 #endif
 
 LV_FONT_DECLARE(font_amt14);

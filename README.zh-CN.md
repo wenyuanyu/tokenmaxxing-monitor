@@ -58,7 +58,7 @@ idf.py set-target esp32s3
 idf.py -DRLCD_BLE_DEVICE_NAME="QwenToken-你的名字" -DRLCD_GREETING_NAME="你的名字" -p /dev/cu.usbmodem* build flash
 ```
 
-烧录完成后屏幕亮起，显示带个性化问候语的 `QWEN CODE` 仪表盘。
+烧录完成后屏幕亮起，显示带个性化问候语的 `TOKENMAXXING` 仪表盘。
 
 #### 问候名是如何工作的
 
@@ -103,7 +103,7 @@ node src/index.js
 │  山果，下午好～        06-09 14:30         26.5°C 62%           │
 ├──────────────────────────────────────────────────────────────────┤
 │                                      │                           │
-│  QWEN CODE                           │  Today Sessions           │
+│  TOKENMAXXING                        │  Today Sessions           │
 │                                      │  11                       │
 │  DAILY SMALL GOAL: 100M              │                           │
 │  2,000,000 Tokens                    │  Active Time              │
@@ -115,7 +115,7 @@ node src/index.js
 │  deepseek-r1                  13%    │  Output Tokens            │
 │                                      │  0.8M                     │
 │  ─────────────────────────           │                           │
-│  QwenLM/qwen-code                    │  Cache Rate               │
+│  QwenCode/Codex/Claude/Qoder/OpenClaw│  Cache Rate               │
 │                                      │  33%                      │
 │                                      │  ─────────────            │
 │                                      │  Last 7 Days              │
@@ -144,6 +144,10 @@ Payload 为 `|` 分隔的文本（v3 格式）：
 | `QWEN_BLE_PUSH_MS` | 1000 | 推送间隔（毫秒） |
 | `QWEN_BLE_SCAN_DAYS` | 7 | 扫描最近 N 天的会话文件 |
 | `QWEN_BLE_TAIL_BYTES` | 2097152 | 每个文件读取尾部字节数 |
+| `TOKEN_MONITOR_DATASOURCES` | `qwen` | 逗号分隔的数据源列表，会统一累加，例如 `qwen,codex` |
+| `CODEX_HOME` | `~/.codex` | `codex` 数据源使用的 Codex 主目录 |
+| `CODEX_SESSIONS_DIR` | `$CODEX_HOME/sessions` | `codex` 数据源扫描的 rollout 目录 |
+| `CODEX_STATE_DB` | `$CODEX_HOME/state_5.sqlite` | `codex` 数据源用于读取线程模型名的状态库 |
 
 ## 注意事项
 

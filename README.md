@@ -57,7 +57,7 @@ idf.py set-target esp32s3
 idf.py -DRLCD_BLE_DEVICE_NAME="QwenToken-YourName" -DRLCD_GREETING_NAME="你的名字" -p /dev/cu.usbmodem* build flash
 ```
 
-After flashing, the screen lights up showing the `QWEN CODE` dashboard with the personalized greeting.
+After flashing, the screen lights up showing the `TOKENMAXXING` dashboard with the personalized greeting.
 
 #### How Greeting Names Work
 
@@ -102,7 +102,7 @@ When you see `[ble] ready` in the terminal, the connection is established and da
 │  山果，下午好～        06-09 14:30         26.5°C 62%           │
 ├──────────────────────────────────────────────────────────────────┤
 │                                      │                           │
-│  QWEN CODE                           │  Today Sessions           │
+│  TOKENMAXXING                        │  Today Sessions           │
 │                                      │  11                       │
 │  DAILY SMALL GOAL: 100M              │                           │
 │  2,000,000 Tokens                    │  Active Time              │
@@ -114,7 +114,7 @@ When you see `[ble] ready` in the terminal, the connection is established and da
 │  deepseek-r1                  13%    │  Output Tokens            │
 │                                      │  0.8M                     │
 │  ─────────────────────────           │                           │
-│  QwenLM/qwen-code                    │  Cache Rate               │
+│  QwenCode/Codex/Claude/Qoder/OpenClaw│  Cache Rate               │
 │                                      │  33%                      │
 │                                      │  ─────────────            │
 │                                      │  Last 7 Days              │
@@ -143,6 +143,10 @@ Payload is `|`-delimited text (v3 format):
 | `QWEN_BLE_PUSH_MS` | 1000 | Push interval in milliseconds |
 | `QWEN_BLE_SCAN_DAYS` | 7 | Scan session files from the last N days |
 | `QWEN_BLE_TAIL_BYTES` | 2097152 | Tail bytes to read per session file |
+| `TOKEN_MONITOR_DATASOURCES` | `qwen` | Comma-separated data sources to aggregate, e.g. `qwen,codex` |
+| `CODEX_HOME` | `~/.codex` | Codex home directory used by the `codex` data source |
+| `CODEX_SESSIONS_DIR` | `$CODEX_HOME/sessions` | Codex rollout directory scanned by the `codex` data source |
+| `CODEX_STATE_DB` | `$CODEX_HOME/state_5.sqlite` | Codex state database used for thread model names |
 
 ## Notes
 

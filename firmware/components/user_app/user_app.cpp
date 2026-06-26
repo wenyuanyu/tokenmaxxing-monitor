@@ -3,6 +3,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_log.h>
+#include <driver/usb_serial_jtag.h>
 
 #include "user_app.h"
 #include "battery.h"
@@ -23,7 +24,7 @@ static void env_task(void *arg)
         bool battery_ok = (battery_read(&battery_pct, NULL) == ESP_OK);
         if (Lvgl_lock(-1)) {
             ui_app_set_env(t, h, ok);
-            ui_app_set_battery(battery_pct, battery_ok, false);
+            ui_app_set_battery(battery_pct, battery_ok, usb_serial_jtag_is_connected());
             Lvgl_unlock();
         }
         vTaskDelay(pdMS_TO_TICKS(10000));

@@ -5,6 +5,7 @@
 #include <esp_log.h>
 
 #include "user_app.h"
+#include "battery.h"
 #include "ble_app.h"
 #include "shtc3.h"
 #include "ui_app.h"
@@ -17,9 +18,12 @@ static void env_task(void *arg)
     (void) arg;
     for (;;) {
         float t = 0, h = 0;
+        int battery_pct = 0;
         bool ok = (shtc3_read(&t, &h) == ESP_OK);
+        bool battery_ok = (battery_read(&battery_pct, NULL) == ESP_OK);
         if (Lvgl_lock(-1)) {
             ui_app_set_env(t, h, ok);
+            ui_app_set_battery(battery_pct, battery_ok, true);
             Lvgl_unlock();
         }
         vTaskDelay(pdMS_TO_TICKS(10000));
@@ -37,6 +41,7 @@ static void on_ble_data(const usage_report_t *report)
 void UserApp_AppInit(void)
 {
     if (shtc3_init() != ESP_OK) ESP_LOGW(TAG, "shtc3 init failed");
+    if (battery_init() != ESP_OK) ESP_LOGW(TAG, "battery init failed");
 }
 
 void UserApp_UiInit(void)

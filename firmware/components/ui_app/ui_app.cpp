@@ -31,7 +31,8 @@ static lv_obj_t *lbl_input;
 static lv_obj_t *lbl_output;
 static lv_obj_t *lbl_rate;
 static lv_obj_t *lbl_week;
-static lv_obj_t *lbl_battery;
+static lv_obj_t *lbl_battery_pct;
+static lv_obj_t *battery_bolt;
 static lv_obj_t *bar_goal;
 static lv_obj_t *lbl_goal;
 
@@ -142,6 +143,34 @@ static void divider(lv_obj_t *p, int x, int y, int w, int h)
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
 }
 
+static lv_obj_t *rect(lv_obj_t *p, int x, int y, int w, int h, bool fill)
+{
+    lv_obj_t *obj = lv_obj_create(p);
+    lv_obj_remove_style_all(obj);
+    lv_obj_set_pos(obj, x, y);
+    lv_obj_set_size(obj, w, h);
+    lv_obj_set_style_border_color(obj, INK, 0);
+    lv_obj_set_style_border_width(obj, fill ? 0 : 2, 0);
+    lv_obj_set_style_bg_color(obj, fill ? INK : WHITE, 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    return obj;
+}
+
+static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
+{
+    static const lv_point_precise_t pts[] = {
+        { 8, 0 }, { 2, 10 }, { 8, 10 }, { 4, 20 },
+    };
+    lv_obj_t *obj = lv_line_create(p);
+    lv_obj_set_pos(obj, x, y);
+    lv_obj_set_size(obj, 12, 22);
+    lv_line_set_points(obj, pts, sizeof(pts) / sizeof(pts[0]));
+    lv_obj_set_style_line_color(obj, INK, 0);
+    lv_obj_set_style_line_width(obj, 2, 0);
+    lv_obj_set_style_line_rounded(obj, false, 0);
+    return obj;
+}
+
 void ui_app_init(void)
 {
     lv_obj_t *s = lv_screen_active();
@@ -222,8 +251,11 @@ void ui_app_init(void)
     label(s, 282, 232, &lv_font_montserrat_12, "Last 7 Days");
     lbl_week = label(s, 282, 246, &lv_font_montserrat_16, "--");
 
-    label(s, 282, 264, &lv_font_montserrat_12, "Battery");
-    lbl_battery = label(s, 282, 278, &lv_font_montserrat_16, "USB/--");
+    rect(s, 282, 270, 66, 22, false);
+    rect(s, 350, 276, 4, 10, true);
+    lbl_battery_pct = aligned(s, 286, 274, 58, LV_TEXT_ALIGN_CENTER,
+                              &lv_font_montserrat_14, "--%");
+    battery_bolt = bolt(s, 364, 270);
 }
 
 void ui_app_update(const usage_report_t *r)
@@ -296,9 +328,23 @@ void ui_app_set_env(float temp_c, float humidity, bool ok)
     lv_label_set_text(lbl_env, b);
 }
 
-void ui_app_set_battery(const char *status)
+void ui_app_set_battery(int percent, bool ok, bool charging)
 {
-    lv_label_set_text(lbl_battery, (status && status[0]) ? status : "USB/--");
+    char b[8];
+    if (ok) {
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        snprintf(b, sizeof(b), "%d%%", percent);
+    } else {
+        snprintf(b, sizeof(b), "--%%");
+    }
+    lv_label_set_text(lbl_battery_pct, b);
+
+    if (charging) {
+        lv_obj_remove_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void ui_app_set_time(const char *hm)

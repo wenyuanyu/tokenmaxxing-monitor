@@ -134,7 +134,7 @@ int main(int argc, char **argv)
     usage_report_t report = dummy_report();
     ui_app_update(&report);
     ui_app_set_env(25.8f, 54.0f, true);
-    ui_app_set_battery(95, true, false);
+    ui_app_set_battery(95, true, true);
 
     render(disp);
     std::string dashboard = std::string(out_dir) + "/dashboard.ppm";

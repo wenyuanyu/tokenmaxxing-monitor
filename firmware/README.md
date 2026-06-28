@@ -110,10 +110,13 @@ consistent on hardware.
 - Battery percentage is estimated from ADC voltage in `components/sensor/battery.c`.
 - USB/external power is inferred in `components/user_app/user_app.cpp`.
 - Battery samples are appended every 30 seconds to the `batlog` partition.
+- The UI recenters the battery percentage when not charging. When charging is
+  shown, a small 1 x 1-pixel-art lightning glyph appears inside the battery
+  frame without changing the batlog sampling interval.
 
 ## KEY Button
 
-`USER_KEY_GPIO` is GPIO 18. It is polled and debounced in
+`USER_KEY_GPIO` is GPIO 18. It uses a GPIO interrupt with software debounce in
 `components/user_app/user_app.cpp`. A press toggles between dashboard and
 activity page.
 

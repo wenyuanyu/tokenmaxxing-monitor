@@ -233,6 +233,10 @@ should emit v3.
 
 - Main page: token dashboard plus sensor and battery status.
 - Activity page: press the board KEY button to toggle.
+- Battery status is drawn as a framed percentage. When charging is reported, a
+  tiny 1 x 1-pixel-art lightning glyph is placed inside the right side of the
+  battery frame; when not charging, the percentage recenters to avoid an empty
+  gap.
 - The RLCD output is 1-bit. Activity "shades" are not true grayscale; they are
   generated in `firmware/main/main.cpp` during LVGL flush using 10 x 10 cell
   dithering.

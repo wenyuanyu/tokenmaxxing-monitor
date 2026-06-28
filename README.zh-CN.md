@@ -44,7 +44,7 @@ bridge/src/index.js
   - 扫描配置过的数据源
   - 汇总今日和历史指标
   - 写入 /tmp/qwen-token-status.json
-  - 每秒推送 BLE v3 payload
+  - 在数据变化或 heartbeat 到期时推送 BLE v3 payload
         |
         v
 ESP32-S3 BLE GATT characteristic
@@ -59,6 +59,10 @@ firmware
         v
 400 x 300 reflective LCD
 ```
+
+电池状态显示在右下角：未充电时百分比居中；充电时百分比左移，右侧在同一个电池框内显示
+1 x 1 pixel-art 黑色闪电。电池日志仍按固件设置的间隔写入 `batlog` 分区，UI 图标变化不会提高
+flash 写入频率。
 
 ## 目录结构
 

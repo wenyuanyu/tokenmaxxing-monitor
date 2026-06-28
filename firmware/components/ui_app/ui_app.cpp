@@ -425,16 +425,37 @@ static void heat_cell(lv_obj_t *p, int col, int row, int level)
 
 static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
 {
-    static const lv_point_precise_t pts[] = {
-        { 8, 0 }, { 2, 10 }, { 8, 10 }, { 4, 20 },
+    static const char *rows[] = {
+        "00111110",
+        "00111100",
+        "01111000",
+        "01110000",
+        "11111110",
+        "11111100",
+        "01111100",
+        "01111000",
+        "11110000",
+        "11100000",
+        "11000000",
     };
-    lv_obj_t *obj = lv_line_create(p);
+    lv_obj_t *obj = lv_obj_create(p);
+    lv_obj_remove_style_all(obj);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(obj, x, y);
-    lv_obj_set_size(obj, 12, 22);
-    lv_line_set_points(obj, pts, sizeof(pts) / sizeof(pts[0]));
-    lv_obj_set_style_line_color(obj, INK, 0);
-    lv_obj_set_style_line_width(obj, 2, 0);
-    lv_obj_set_style_line_rounded(obj, false, 0);
+    lv_obj_set_size(obj, 8, 11);
+
+    for (int row = 0; row < 11; row++) {
+        for (int col = 0; col < 8; col++) {
+            if (rows[row][col] != '1') continue;
+            lv_obj_t *px = lv_obj_create(obj);
+            lv_obj_remove_style_all(px);
+            lv_obj_clear_flag(px, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_pos(px, col, row);
+            lv_obj_set_size(px, 1, 1);
+            lv_obj_set_style_bg_color(px, INK, 0);
+            lv_obj_set_style_bg_opa(px, LV_OPA_COVER, 0);
+        }
+    }
     return obj;
 }
 
@@ -561,7 +582,7 @@ static void create_activity_page(lv_obj_t *s)
     rect(page_activity, 350, 276, 4, 10, true);
     lbl_activity_battery_pct = aligned(page_activity, 286, 274, 58, LV_TEXT_ALIGN_CENTER,
                                        &lv_font_montserrat_14, "--%");
-    activity_battery_bolt = bolt(page_activity, 364, 270);
+    activity_battery_bolt = bolt(page_activity, 336, 276);
     lv_obj_add_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -649,7 +670,7 @@ void ui_app_init(void)
     rect(s, 350, 276, 4, 10, true);
     lbl_battery_pct = aligned(s, 286, 274, 58, LV_TEXT_ALIGN_CENTER,
                               &lv_font_montserrat_14, "--%");
-    battery_bolt = bolt(s, 364, 270);
+    battery_bolt = bolt(s, 336, 276);
     lv_obj_add_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
 
     create_activity_page(s);
@@ -776,11 +797,23 @@ void ui_app_set_battery(int percent, bool ok, bool charging)
     if (lbl_activity_battery_pct) lv_label_set_text(lbl_activity_battery_pct, b);
 
     if (charging) {
+        lv_obj_set_x(lbl_battery_pct, 286);
+        lv_obj_set_width(lbl_battery_pct, 44);
+        if (lbl_activity_battery_pct) {
+            lv_obj_set_x(lbl_activity_battery_pct, 286);
+            lv_obj_set_width(lbl_activity_battery_pct, 44);
+        }
         lv_obj_remove_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
         if (activity_battery_bolt) {
             lv_obj_remove_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);
         }
     } else {
+        lv_obj_set_x(lbl_battery_pct, 286);
+        lv_obj_set_width(lbl_battery_pct, 58);
+        if (lbl_activity_battery_pct) {
+            lv_obj_set_x(lbl_activity_battery_pct, 286);
+            lv_obj_set_width(lbl_activity_battery_pct, 58);
+        }
         lv_obj_add_flag(battery_bolt, LV_OBJ_FLAG_HIDDEN);
         if (activity_battery_bolt) {
             lv_obj_add_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);

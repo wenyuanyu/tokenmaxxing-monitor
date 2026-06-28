@@ -59,7 +59,8 @@ func fmtActive(_ mins: Int) -> String {
 
 func greetingText() -> String {
     let h = Calendar.current.component(.hour, from: Date())
-    if h >= 5 && h < 12 { return "早上好～" }
+    if h < 5 { return "凌晨好～" }
+    if h < 12 { return "早上好～" }
     if h < 18 { return "下午好～" }
     return "晚上好～"
 }
@@ -506,9 +507,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: 34)
         if let btn = statusItem.button {
-            btn.title = "RLCD"
+            if let path = Bundle.main.path(forResource: "menubar_icon", ofType: "png"),
+               let image = NSImage(contentsOfFile: path) {
+                image.isTemplate = true
+                image.size = NSSize(width: 28, height: 18)
+                btn.image = image
+                btn.title = ""
+            } else {
+                btn.title = "TM"
+            }
             btn.toolTip = "TokenMaxxing RLCD Bridge"
             btn.action = #selector(togglePopover)
             btn.target = self

@@ -35,6 +35,7 @@ typedef struct {
     int32_t model_2_pct;
     int32_t model_3_pct;
     char updated_at[16];
+    int32_t timezone_offset_minutes;
     uint8_t activity_levels[26][7];
     bool valid;
 } usage_report_t;

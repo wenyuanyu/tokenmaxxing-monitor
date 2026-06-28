@@ -207,11 +207,16 @@ Writable characteristic UUID:
 Payload format is pipe-delimited text. Current format is version `3`:
 
 ```text
-3|todayTotal|sessionsToday|todayCached|cacheRate|activeMinutes|updatedAt|
+3|todayTotal|sessionsToday|todayCached|cacheRate|activeMinutes|updatedAtUnix|tzOffsetMinutes|
 model1|model1Pct|model2|model2Pct|model3|model3Pct|
 errorsToday|ageSec|todayOutput|weekTotal|todayInput|
 activity|lifetimeTotal|peakDailyTotal|streakDays|longestTaskMinutes
 ```
+
+`updatedAtUnix` is Unix time in seconds. `tzOffsetMinutes` is the local
+offset from UTC in minutes, for example `480` for UTC+8. Firmware uses those
+two fields to derive the local header clock and the activity page's natural
+week/month labels.
 
 The `activity` field is 104 base36 characters:
 

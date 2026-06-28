@@ -59,11 +59,14 @@ font containing those glyphs under `build/`.
 The current bridge emits v3:
 
 ```text
-3|todayTotal|sessionsToday|todayCached|cacheRate|activeMinutes|updatedAt|
+3|todayTotal|sessionsToday|todayCached|cacheRate|activeMinutes|updatedAtUnix|tzOffsetMinutes|
 model1|model1Pct|model2|model2Pct|model3|model3Pct|
 errorsToday|ageSec|todayOutput|weekTotal|todayInput|
 activity|lifetimeTotal|peakDailyTotal|streakDays|longestTaskMinutes
 ```
+
+`updatedAtUnix` is Unix time in seconds. `tzOffsetMinutes` is the local
+offset from UTC in minutes, for example `480` for UTC+8.
 
 Parser entry point:
 

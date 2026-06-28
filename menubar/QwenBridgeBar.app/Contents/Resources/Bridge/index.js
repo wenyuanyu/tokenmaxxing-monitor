@@ -15,6 +15,7 @@ const DATA_CHAR_UUID = '00112233445566778899aabbccddee01';
 const INTERVAL_MS = Number(process.env.QWEN_BLE_PUSH_MS ?? 1000);
 const RECENT_DAYS = Number(process.env.QWEN_BLE_SCAN_DAYS ?? 7);
 const ACTIVITY_DAYS = 26 * 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DAYS = Number(process.env.TOKEN_MONITOR_HISTORY_DAYS ?? 3650);
 const ACTIVE_GAP_MS = 5 * 60 * 1000;
 const STATUS_FILE = '/tmp/qwen-token-status.json';
@@ -144,6 +145,10 @@ function formatStamp(ms) {
   const mi = String(d.getMinutes()).padStart(2, '0');
   const ss = String(d.getSeconds()).padStart(2, '0');
   return `${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function timezoneOffsetMinutes(ms = Date.now()) {
+  return -new Date(ms).getTimezoneOffset();
 }
 
 function localDateKey(ms) {
@@ -518,12 +523,16 @@ function encodeActivityColumn(levels) {
 function activityPayload(dailyTotals) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const todayWeekStart = today.getTime() - today.getDay() * DAY_MS;
   const cells = Array.from({ length: 26 }, () => Array(7).fill(0));
 
   for (let age = 0; age < ACTIVITY_DAYS; age++) {
     const d = new Date(today.getTime() - age * 24 * 60 * 60 * 1000);
-    const col = 25 - Math.floor(age / 7);
     const row = d.getDay();
+    const weekStart = d.getTime() - row * DAY_MS;
+    const weekAge = Math.round((todayWeekStart - weekStart) / (7 * DAY_MS));
+    const col = 25 - weekAge;
+    if (col < 0 || col >= 26) continue;
     cells[col][row] = dailyTotals.get(localDateKey(d.getTime())) ?? 0;
   }
 
@@ -552,6 +561,8 @@ function finalizeReport(totals, sourceNames) {
     model: totals.latest?.model ?? sourceNames[0] ?? 'tokens',
     models,
     updatedAt: formatStamp(now),
+    updatedAtUnix: Math.floor(now / 1000),
+    timezoneOffsetMinutes: timezoneOffsetMinutes(now),
     ageSec: Math.max(0, Math.round((now - latestTs) / 1000)),
     weekTotal: totals.weekTotal,
     lifetimeTotal,
@@ -597,7 +608,8 @@ function toPayload(r) {
     r.todayCached,
     r.cacheRate,
     r.activeMinutes,
-    r.updatedAt,
+    r.updatedAtUnix,
+    r.timezoneOffsetMinutes,
     r.models[0].model,
     r.models[0].pct,
     r.models[1].model,

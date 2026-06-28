@@ -4,10 +4,15 @@
 #include "lvgl.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef RLCD_GREETING_NAME
 #define RLCD_GREETING_NAME ""
+#endif
+
+#ifndef RLCD_TZ_OFFSET_MINUTES
+#define RLCD_TZ_OFFSET_MINUTES 480
 #endif
 
 LV_FONT_DECLARE(font_amt14);
@@ -50,9 +55,11 @@ static lv_obj_t *lbl_activity_streak;
 static lv_obj_t *lbl_activity_longest_task;
 static lv_obj_t *lbl_activity_battery_pct;
 static lv_obj_t *activity_battery_bolt;
+static lv_obj_t *activity_month_labels[8];
 static lv_obj_t *activity_cells[26][7];
 static bool s_activity_visible;
 static bool s_clock_valid;
+static int s_clock_year;
 static int s_clock_month;
 static int s_clock_day;
 static int s_clock_hour;
@@ -113,7 +120,8 @@ static const char *greeting_for_stamp(const char *s)
 {
     int h = hour_from_stamp(s);
     const char *period;
-    if (h >= 5 && h < 12)  period = "\xe6\x97\xa9\xe4\xb8\x8a\xe5\xa5\xbd\xef\xbd\x9e";  /* 早上好～ */
+    if (h < 5)              period = "\xe5\x87\x8c\xe6\x99\xa8\xe5\xa5\xbd\xef\xbd\x9e";  /* 凌晨好～ */
+    else if (h < 12)        period = "\xe6\x97\xa9\xe4\xb8\x8a\xe5\xa5\xbd\xef\xbd\x9e";  /* 早上好～ */
     else if (h < 18)        period = "\xe4\xb8\x8b\xe5\x8d\x88\xe5\xa5\xbd\xef\xbd\x9e";  /* 下午好～ */
     else                    period = "\xe6\x99\x9a\xe4\xb8\x8a\xe5\xa5\xbd\xef\xbd\x9e";  /* 晚上好～ */
     const char *name = RLCD_GREETING_NAME;
@@ -130,11 +138,67 @@ static int64_t uptime_sec(void)
     return esp_timer_get_time() / 1000000LL;
 }
 
-static int days_in_month(int month)
+static bool is_leap_year(int year)
+{
+    return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static int days_in_month(int year, int month)
 {
     static const int days[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
     if (month < 1 || month > 12) return 31;
+    if (month == 2 && is_leap_year(year)) return 29;
     return days[month - 1];
+}
+
+static int64_t floor_div_i64(int64_t a, int64_t b)
+{
+    int64_t q = a / b;
+    int64_t r = a % b;
+    if (r != 0 && ((r > 0) != (b > 0))) q--;
+    return q;
+}
+
+static int positive_mod_i64(int64_t a, int b)
+{
+    int r = (int)(a % b);
+    return r < 0 ? r + b : r;
+}
+
+static void civil_from_days(int64_t z, int *year, int *month, int *day)
+{
+    z += 719468;
+    const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    const unsigned doe = (unsigned)(z - era * 146097);
+    const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int y = (int)yoe + (int)era * 400;
+    const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const unsigned mp = (5 * doy + 2) / 153;
+    const unsigned d = doy - (153 * mp + 2) / 5 + 1;
+    const unsigned m = mp < 10 ? mp + 3 : mp - 9;
+    y += (m <= 2);
+    *year = y;
+    *month = (int)m;
+    *day = (int)d;
+}
+
+static bool parse_unix_stamp(const char *s, int offset_minutes,
+                             int *year, int *month, int *day,
+                             int *hour, int *min, int *sec)
+{
+    if (!s || !s[0]) return false;
+    char *end = NULL;
+    int64_t utc_sec = strtoll(s, &end, 10);
+    if (end == s || *end != '\0' || utc_sec <= 0) return false;
+
+    int64_t local_sec = utc_sec + (int64_t)offset_minutes * 60;
+    int64_t days = floor_div_i64(local_sec, 86400);
+    int sod = positive_mod_i64(local_sec, 86400);
+    civil_from_days(days, year, month, day);
+    *hour = sod / 3600;
+    *min = (sod % 3600) / 60;
+    *sec = sod % 60;
+    return true;
 }
 
 static bool parse_bridge_stamp(const char *s, int *month, int *day,
@@ -144,7 +208,7 @@ static bool parse_bridge_stamp(const char *s, int *month, int *day,
     if (!s || sscanf(s, "%2d-%2d %2d:%2d:%2d", &mo, &da, &hh, &mm, &ss) != 5) {
         return false;
     }
-    if (mo < 1 || mo > 12 || da < 1 || da > days_in_month(mo) ||
+    if (mo < 1 || mo > 12 || da < 1 || da > days_in_month(2026, mo) ||
         hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
         return false;
     }
@@ -156,13 +220,57 @@ static bool parse_bridge_stamp(const char *s, int *month, int *day,
     return true;
 }
 
-static void advance_local_day(int *month, int *day)
+static void advance_local_day(int *year, int *month, int *day)
 {
     (*day)++;
-    if (*day <= days_in_month(*month)) return;
+    if (*day <= days_in_month(*year, *month)) return;
     *day = 1;
     (*month)++;
-    if (*month > 12) *month = 1;
+    if (*month > 12) {
+        *month = 1;
+        (*year)++;
+    }
+}
+
+static void retreat_local_day(int *year, int *month, int *day)
+{
+    (*day)--;
+    if (*day >= 1) return;
+    (*month)--;
+    if (*month < 1) {
+        *month = 12;
+        (*year)--;
+    }
+    *day = days_in_month(*year, *month);
+}
+
+static void add_local_days(int *year, int *month, int *day, int delta)
+{
+    while (delta > 0) {
+        advance_local_day(year, month, day);
+        delta--;
+    }
+    while (delta < 0) {
+        retreat_local_day(year, month, day);
+        delta++;
+    }
+}
+
+static int day_of_week(int year, int month, int day)
+{
+    static const int t[] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    if (month < 3) year--;
+    return (year + year / 4 - year / 100 + year / 400 + t[month - 1] + day) % 7;
+}
+
+static const char *month_name(int month)
+{
+    static const char *names[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    };
+    if (month < 1 || month > 12) return "";
+    return names[month - 1];
 }
 
 static void format_clock_stamp(char *out, size_t out_size,
@@ -172,10 +280,14 @@ static void format_clock_stamp(char *out, size_t out_size,
              month, day, hour, min, sec);
 }
 
-static void sync_clock_from_stamp(const char *stamp)
+static void sync_clock_from_stamp(const char *stamp, int offset_minutes)
 {
-    int mo = 0, da = 0, hh = 0, mm = 0, ss = 0;
-    if (!parse_bridge_stamp(stamp, &mo, &da, &hh, &mm, &ss)) return;
+    int yr = 0, mo = 0, da = 0, hh = 0, mm = 0, ss = 0;
+    if (!parse_unix_stamp(stamp, offset_minutes, &yr, &mo, &da, &hh, &mm, &ss)) {
+        yr = 2026;
+        if (!parse_bridge_stamp(stamp, &mo, &da, &hh, &mm, &ss)) return;
+    }
+    s_clock_year = yr;
     s_clock_month = mo;
     s_clock_day = da;
     s_clock_hour = hh;
@@ -291,12 +403,17 @@ static void set_heat_cell_level(int col, int row, int level)
     lv_obj_set_style_bg_color(activity_cells[col][row], activity_color_for_level(level), 0);
 }
 
+static int activity_col_x(int col)
+{
+    return 52 + col * 12;
+}
+
 static void heat_cell(lv_obj_t *p, int col, int row, int level)
 {
     lv_obj_t *obj = lv_obj_create(p);
     lv_obj_remove_style_all(obj);
     lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(obj, 52 + col * 12, 124 + row * 12);
+    lv_obj_set_pos(obj, activity_col_x(col), 124 + row * 12);
     lv_obj_set_size(obj, 10, 10);
     lv_obj_set_style_bg_color(obj, activity_color_for_level(level), 0);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
@@ -318,6 +435,54 @@ static lv_obj_t *bolt(lv_obj_t *p, int x, int y)
     lv_obj_set_style_line_width(obj, 2, 0);
     lv_obj_set_style_line_rounded(obj, false, 0);
     return obj;
+}
+
+static void hide_activity_months(void)
+{
+    const int label_count = (int)(sizeof(activity_month_labels) / sizeof(activity_month_labels[0]));
+    for (int i = 0; i < label_count; i++) {
+        if (activity_month_labels[i]) lv_obj_add_flag(activity_month_labels[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void apply_activity_months_for_date(int year, int month, int day)
+{
+    hide_activity_months();
+    const int label_count = (int)(sizeof(activity_month_labels) / sizeof(activity_month_labels[0]));
+    int start_year = year;
+    int start_month = month;
+    int start_day = day;
+    add_local_days(&start_year, &start_month, &start_day,
+                   -day_of_week(year, month, day) - 25 * 7);
+
+    int previous_month = 0;
+    int label_idx = 0;
+    for (int col = 0; col < 26 && label_idx < label_count; col++) {
+        int week_year = start_year;
+        int week_month = start_month;
+        int week_day = start_day;
+        add_local_days(&week_year, &week_month, &week_day, col * 7);
+
+        int label_month = (col == 0) ? week_month : 0;
+        for (int row = 0; row < 7; row++) {
+            int cell_year = week_year;
+            int cell_month = week_month;
+            int cell_day = week_day;
+            add_local_days(&cell_year, &cell_month, &cell_day, row);
+            if (cell_day == 1) {
+                label_month = cell_month;
+                break;
+            }
+        }
+
+        if (label_month > 0 && label_month != previous_month) {
+            lv_obj_t *lbl = activity_month_labels[label_idx++];
+            lv_obj_set_x(lbl, activity_col_x(col) - 6);
+            lv_label_set_text(lbl, month_name(label_month));
+            lv_obj_remove_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+            previous_month = label_month;
+        }
+    }
 }
 
 static int activity_level_for_tokens(uint64_t tokens)
@@ -374,10 +539,9 @@ static void create_activity_page(lv_obj_t *s)
     lbl_activity_longest_task = label(page_activity, 12, 94, &lv_font_montserrat_14,
                                       "Longest task --");
 
-    const char *months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun" };
-    const int month_x[] = { 46, 94, 142, 190, 238, 286 };
-    for (int i = 0; i < 6; i++) {
-        label(page_activity, month_x[i], 110, &lv_font_montserrat_12, months[i]);
+    for (int i = 0; i < (int)(sizeof(activity_month_labels) / sizeof(activity_month_labels[0])); i++) {
+        activity_month_labels[i] = label(page_activity, 46, 110, &lv_font_montserrat_12, "");
+        lv_obj_add_flag(activity_month_labels[i], LV_OBJ_FLAG_HIDDEN);
     }
 
     static const char *days[] = { "Su", "Mo", "Tu", "We", "Th", "Fr", "Sa" };
@@ -514,7 +678,7 @@ void ui_app_update(const usage_report_t *r)
 
     /* header: greeting + time */
     if (r->updated_at[0]) {
-        sync_clock_from_stamp(r->updated_at);
+        sync_clock_from_stamp(r->updated_at, r->timezone_offset_minutes);
         ui_app_refresh_clock();
     }
 
@@ -565,7 +729,6 @@ void ui_app_update(const usage_report_t *r)
         snprintf(b, sizeof(b), "Longest task %s", n);
         lv_label_set_text(lbl_activity_longest_task, b);
     }
-
     for (int col = 0; col < 26; col++) {
         for (int row = 0; row < 7; row++) {
             set_heat_cell_level(col, row, r->activity_levels[col][row]);
@@ -624,6 +787,7 @@ void ui_app_refresh_clock(void)
     int64_t elapsed = uptime_sec() - s_clock_anchor_sec;
     if (elapsed < 0) elapsed = 0;
 
+    int year = s_clock_year;
     int month = s_clock_month;
     int day = s_clock_day;
     int hour = s_clock_hour;
@@ -649,11 +813,12 @@ void ui_app_refresh_clock(void)
     }
 
     while (carry_day-- > 0) {
-        advance_local_day(&month, &day);
+        advance_local_day(&year, &month, &day);
     }
 
     char stamp[16];
     format_clock_stamp(stamp, sizeof(stamp), month, day, hour, min, sec);
+    apply_activity_months_for_date(year, month, day);
     apply_clock_labels(stamp);
 }
 

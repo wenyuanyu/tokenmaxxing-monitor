@@ -80,7 +80,8 @@ static usage_report_t dummy_report()
     r.model_1_pct = 62;
     r.model_2_pct = 25;
     r.model_3_pct = 13;
-    std::snprintf(r.updated_at, sizeof(r.updated_at), "06-26 22:48");
+    std::snprintf(r.updated_at, sizeof(r.updated_at), "1782632880");
+    r.timezone_offset_minutes = 480;
     const uint32_t recent_tokens[5][7] = {
         {0, 0, 0, 0, 0, 0, 0},
         {0, 0, 420000, 0, 0, 0, 0},

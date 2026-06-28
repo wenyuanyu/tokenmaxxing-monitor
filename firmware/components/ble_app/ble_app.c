@@ -24,7 +24,7 @@ static const char *DEVICE_NAME = RLCD_BLE_DEVICE_NAME;
 
 static ble_data_cb_t s_data_cb;
 static uint8_t s_own_addr_type;
-static char s_last_payload[384] = "3|0|0|0|0|0|-- --:--|--|0|--|0|--|0|0|0";
+static char s_last_payload[384] = "3|0|0|0|0|0|0|480|--|0|--|0|--|0|0|0";
 
 static const ble_uuid128_t SVC_UUID =
     BLE_UUID128_INIT(0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88,
@@ -106,6 +106,7 @@ static bool parse_payload_v3(char *line, usage_report_t *out)
     if (!next_i32(&save, &out->cache_rate)) return false;
     if (!next_i32(&save, &out->active_minutes)) return false;
     if (!next_str(&save, out->updated_at, sizeof(out->updated_at))) return false;
+    if (!next_i32(&save, &out->timezone_offset_minutes)) return false;
     if (!next_str(&save, out->model_1, sizeof(out->model_1))) return false;
     if (!next_i32(&save, &out->model_1_pct)) return false;
     if (!next_str(&save, out->model_2, sizeof(out->model_2))) return false;

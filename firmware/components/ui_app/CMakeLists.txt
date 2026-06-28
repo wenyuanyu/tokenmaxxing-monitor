@@ -16,7 +16,7 @@ endif()
 # --- Build-time font generation ---
 # Base symbols: greeting phrases + ASCII (no user names committed to repo)
 # The greeting name's characters are merged in automatically at build time.
-set(FONT_ZH18_BASE_SYMBOLS "，早上好～下午晚上ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+set(FONT_ZH18_BASE_SYMBOLS "，凌晨早上好～下午晚上ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
 
 if(DEFINED RLCD_GREETING_NAME)
     set(FONT_ZH18_SYMBOLS "${FONT_ZH18_BASE_SYMBOLS}${RLCD_GREETING_NAME}")

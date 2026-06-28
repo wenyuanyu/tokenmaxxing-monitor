@@ -276,8 +276,9 @@ static const char *month_name(int month)
 static void format_clock_stamp(char *out, size_t out_size,
                                int month, int day, int hour, int min, int sec)
 {
-    snprintf(out, out_size, "%02d-%02d %02d:%02d:%02d",
-             month, day, hour, min, sec);
+    (void)sec;
+    snprintf(out, out_size, "%02d-%02d %02d:%02d",
+             month, day, hour, min);
 }
 
 static void sync_clock_from_stamp(const char *stamp, int offset_minutes)
@@ -661,6 +662,25 @@ void ui_app_update(const usage_report_t *r)
     char b[48];
     char n[32];
 
+    /* header clock is volatile; heartbeats can update it without repainting data. */
+    if (r->updated_at[0]) {
+        sync_clock_from_stamp(r->updated_at, r->timezone_offset_minutes);
+        ui_app_refresh_clock();
+    }
+
+    static bool have_rendered_report;
+    static usage_report_t last_rendered_report;
+    usage_report_t comparable_report = *r;
+    memset(comparable_report.updated_at, 0, sizeof(comparable_report.updated_at));
+    comparable_report.timezone_offset_minutes = 0;
+    comparable_report.age_sec = 0;
+    if (have_rendered_report &&
+        memcmp(&last_rendered_report, &comparable_report, sizeof(comparable_report)) == 0) {
+        return;
+    }
+    last_rendered_report = comparable_report;
+    have_rendered_report = true;
+
     /* today token — number + unit */
     fmt_tok(n, sizeof(n), r->today_total);
     lv_label_set_text(lbl_today, n);
@@ -675,12 +695,6 @@ void ui_app_update(const usage_report_t *r)
     if (pct > 100.0) pct = 100.0;
     snprintf(b, sizeof(b), "%.1f%%", pct);
     lv_label_set_text(lbl_goal, b);
-
-    /* header: greeting + time */
-    if (r->updated_at[0]) {
-        sync_clock_from_stamp(r->updated_at, r->timezone_offset_minutes);
-        ui_app_refresh_clock();
-    }
 
     /* top 3 models */
     lv_label_set_text(lbl_model_1, r->model_1[0] ? r->model_1 : "--");
@@ -820,6 +834,19 @@ void ui_app_refresh_clock(void)
     format_clock_stamp(stamp, sizeof(stamp), month, day, hour, min, sec);
     apply_activity_months_for_date(year, month, day);
     apply_clock_labels(stamp);
+}
+
+uint32_t ui_app_clock_delay_ms(void)
+{
+    if (!s_clock_valid) return 60000;
+
+    int64_t elapsed = uptime_sec() - s_clock_anchor_sec;
+    if (elapsed < 0) elapsed = 0;
+
+    int sec = (s_clock_sec + (int)(elapsed % 60)) % 60;
+    uint32_t delay = (uint32_t)(60 - sec) * 1000;
+    if (delay < 1000) delay = 1000;
+    return delay;
 }
 
 void ui_app_mark_stale(void)

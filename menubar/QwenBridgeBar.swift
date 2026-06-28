@@ -3,6 +3,8 @@
 //  Build: see build.sh
 
 import Cocoa
+import CoreBluetooth
+import Darwin
 import ServiceManagement
 import SwiftUI
 
@@ -27,6 +29,7 @@ struct TokenStatus: Codable {
     var ageSec: Int = 0
     var bleConnected: Bool = false
     var bleDevice: String = ""
+    var timestamp: Double = 0
 
     struct ModelEntry: Codable {
         var model: String = "--"
@@ -65,11 +68,36 @@ func greetingText() -> String {
     return "晚上好～"
 }
 
+// MARK: - Bluetooth Permission Probe
+
+final class BluetoothPermissionProbe: NSObject, CBCentralManagerDelegate {
+    static let shared = BluetoothPermissionProbe()
+    private var manager: CBCentralManager?
+
+    func start() {
+        if manager != nil { return }
+        manager = CBCentralManager(
+            delegate: self,
+            queue: .main,
+            options: [CBCentralManagerOptionShowPowerAlertKey: true]
+        )
+    }
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        print("[ble-permission] state \(central.state.rawValue)")
+    }
+}
+
 // MARK: - Bridge Process Manager
 
 func findNode() -> String? {
     // Check common paths first, then fall back to PATH lookup
+    let bundledNode: String = {
+        guard let executablePath = Bundle.main.executablePath else { return "" }
+        return ((executablePath as NSString).deletingLastPathComponent as NSString).appendingPathComponent("node")
+    }()
     let candidates = [
+        bundledNode,
         "/usr/local/bin/node",
         "/opt/homebrew/bin/node",
         NSHomeDirectory() + "/.nvm/versions/node/v22.22.2/bin/node",
@@ -87,6 +115,18 @@ func findNode() -> String? {
     do { try p.run(); p.waitUntilExit() } catch { return nil }
     let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     return (out != nil && FileManager.default.isExecutableFile(atPath: out!)) ? out : nil
+}
+
+func findLaunchAgentNode() -> String? {
+    let candidates = [
+        "/usr/local/bin/node",
+        "/opt/homebrew/bin/node",
+        NSHomeDirectory() + "/.nvm/versions/node/v22.22.2/bin/node",
+    ]
+    for path in candidates {
+        if FileManager.default.isExecutableFile(atPath: path) { return path }
+    }
+    return findNode()
 }
 
 func bridgeScriptPath() -> String? {
@@ -110,14 +150,10 @@ class StatusManager: ObservableObject {
     }()
 
     private var timer: Timer?
-    private var bridgeProcess: Process?
     private var bridgeShouldRun = false
-    private var sleepObserver: NSObjectProtocol?
-    private var wakeObserver: NSObjectProtocol?
 
     func start() {
         ensureLaunchAtLogin()
-        installPowerObservers()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in self.refresh() }
     }
@@ -125,43 +161,6 @@ class StatusManager: ObservableObject {
     func stop() {
         bridgeShouldRun = false
         timer?.invalidate()
-        removePowerObservers()
-    }
-
-    private func installPowerObservers() {
-        guard sleepObserver == nil && wakeObserver == nil else { return }
-        let center = NSWorkspace.shared.notificationCenter
-        sleepObserver = center.addObserver(
-            forName: NSWorkspace.willSleepNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            print("[power] will sleep, stopping bridge")
-            self?.doStop()
-        }
-        wakeObserver = center.addObserver(
-            forName: NSWorkspace.didWakeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            print("[power] did wake, restarting bridge")
-            self?.bridgeShouldRun = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                self?.doStart()
-            }
-        }
-    }
-
-    private func removePowerObservers() {
-        let center = NSWorkspace.shared.notificationCenter
-        if let sleepObserver {
-            center.removeObserver(sleepObserver)
-            self.sleepObserver = nil
-        }
-        if let wakeObserver {
-            center.removeObserver(wakeObserver)
-            self.wakeObserver = nil
-        }
     }
 
     private func refresh() {
@@ -175,77 +174,90 @@ class StatusManager: ObservableObject {
             DispatchQueue.main.async { self.fileExists = false }
         }
 
-        // Check if bridge process is alive
-        let pid = bridgeProcess?.processIdentifier ?? -1
-        let alive = pid > 0 && (bridgeProcess?.isRunning ?? false)
+        let statusFresh = status.timestamp > 0 &&
+            Date().timeIntervalSince1970 * 1000 - status.timestamp < 15000
         DispatchQueue.main.async {
-            self.bridgeRunning = alive
-            self.bridgePID = alive ? Int(pid) : -1
+            self.bridgeRunning = statusFresh
+            self.bridgePID = -1
+        }
+    }
+
+    private func launchAgentPath() -> String {
+        let dir = NSHomeDirectory() + "/Library/LaunchAgents"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return dir + "/io.github.tokenmaxxing.rlcd-bridge.plist"
+    }
+
+    private func writeLaunchAgent() -> Bool {
+        guard let nodePath = findLaunchAgentNode() else { return false }
+        guard let scriptPath = bridgeScriptPath() else { return false }
+        let bridgeDir = (scriptPath as NSString).deletingLastPathComponent
+        let name = bleDeviceName.isEmpty ? "QwenToken" : bleDeviceName
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key><string>io.github.tokenmaxxing.rlcd-bridge</string>
+            <key>RunAtLoad</key><true/>
+            <key>KeepAlive</key><true/>
+            <key>ProgramArguments</key>
+            <array>
+                <string>\(nodePath)</string>
+                <string>\(scriptPath)</string>
+            </array>
+            <key>WorkingDirectory</key><string>\(bridgeDir)</string>
+            <key>EnvironmentVariables</key>
+            <dict>
+                <key>TOKEN_MONITOR_DATASOURCES</key><string>qwen,codex</string>
+                <key>QWEN_BLE_DEVICE_NAME</key><string>\(name)</string>
+            </dict>
+            <key>StandardOutPath</key><string>\(LOG_FILE)</string>
+            <key>StandardErrorPath</key><string>\(LOG_FILE)</string>
+        </dict>
+        </plist>
+        """
+        do {
+            try plist.write(toFile: launchAgentPath(), atomically: true, encoding: .utf8)
+            return true
+        } catch {
+            print("[bridge] write LaunchAgent failed: \(error)")
+            return false
+        }
+    }
+
+    @discardableResult
+    private func runLaunchctl(_ args: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = args
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
+            print("[bridge] launchctl failed: \(error)")
+            return false
         }
     }
 
     func doStart() {
         bridgeShouldRun = true
-        guard bridgeProcess?.isRunning != true else { return }
-        guard let nodePath = findNode() else { return }
-        guard let scriptPath = bridgeScriptPath() else { return }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: nodePath)
-        process.arguments = [scriptPath]
-        process.currentDirectoryURL = URL(fileURLWithPath: (scriptPath as NSString).deletingLastPathComponent)
-
-        // Pass BLE device name as env var
-        var env = ProcessInfo.processInfo.environment
-        env["TOKEN_MONITOR_DATASOURCES"] = env["TOKEN_MONITOR_DATASOURCES"] ?? "qwen,codex"
-        env["QWEN_BLE_DEVICE_NAME"] = bleDeviceName.isEmpty ? "QwenToken" : bleDeviceName
-        process.environment = env
-
-        // Redirect stdout/stderr to log file via pipe
-        let outPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = outPipe
-        FileManager.default.createFile(atPath: LOG_FILE, contents: nil)
-        let logFH = FileHandle(forWritingAtPath: LOG_FILE)
-        outPipe.fileHandleForReading.readabilityHandler = { fh in
-            let data = fh.availableData
-            if !data.isEmpty { logFH?.write(data) }
+        guard writeLaunchAgent() else { return }
+        let domain = "gui/\(getuid())"
+        let plist = launchAgentPath()
+        if !runLaunchctl(["bootstrap", domain, plist]) {
+            _ = runLaunchctl(["bootout", domain, plist])
+            _ = runLaunchctl(["bootstrap", domain, plist])
         }
-
-        process.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async {
-                let shouldRestart = self?.bridgeShouldRun ?? false
-                self?.bridgeProcess = nil
-                self?.refresh()
-                if shouldRestart {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        self?.doStart()
-                    }
-                }
-            }
-        }
-
-        do {
-            try process.run()
-            bridgeProcess = process
-        } catch {
-            print("[bridge] start failed: \(error)")
-        }
+        _ = runLaunchctl(["kickstart", "-k", "\(domain)/io.github.tokenmaxxing.rlcd-bridge"])
         Thread.sleep(forTimeInterval: 0.5)
         refresh()
     }
 
     func doStop() {
         bridgeShouldRun = false
-        guard let process = bridgeProcess, process.isRunning else { return }
-        // Send SIGTERM for clean BLE disconnect
-        kill(process.processIdentifier, SIGTERM)
-        // Force kill after 3 seconds if still alive
-        DispatchQueue.global().asyncAfter(deadline: .now() + 3) { [weak self] in
-            if let p = self?.bridgeProcess, p.isRunning {
-                p.terminate()
-            }
-        }
+        _ = runLaunchctl(["bootout", "gui/\(getuid())", launchAgentPath()])
         Thread.sleep(forTimeInterval: 0.5)
         refresh()
     }
@@ -506,6 +518,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        BluetoothPermissionProbe.shared.start()
 
         statusItem = NSStatusBar.system.statusItem(withLength: 34)
         if let btn = statusItem.button {
@@ -529,7 +542,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(rootView: DashboardView(manager: manager))
 
         manager.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             self.manager.doStart()
         }
     }

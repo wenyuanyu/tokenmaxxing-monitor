@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_bt.h"
 #include "host/ble_hs.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
@@ -360,6 +361,12 @@ esp_err_t ble_app_init(ble_data_cb_t cb)
     if (rc != ESP_OK) {
         ESP_LOGE(TAG, "nimble init failed rc=%d", rc);
         return ESP_FAIL;
+    }
+    esp_err_t tx_err = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P3);
+    if (tx_err == ESP_OK) tx_err = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P3);
+    if (tx_err == ESP_OK) tx_err = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_CONN_HDL0, ESP_PWR_LVL_P3);
+    if (tx_err != ESP_OK) {
+        ESP_LOGW(TAG, "BLE tx power unchanged: %s", esp_err_to_name(tx_err));
     }
 
     ble_hs_cfg.sync_cb = on_sync;

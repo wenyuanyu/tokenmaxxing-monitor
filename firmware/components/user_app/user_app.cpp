@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 #include <freertos/task.h>
 #include <esp_log.h>
 #include <driver/gpio.h>
@@ -16,13 +17,17 @@
 
 static const char *TAG = "user_app";
 
-#define STATUS_REFRESH_MS 3000
+#define STATUS_REFRESH_MS 15000
+#define USB_STATUS_WATCH_MS 500
 #define BATTERY_LOG_INTERVAL_MS 30000
 #define BATTERY_USB_RISE_SAMPLES 20
 #define USER_KEY_GPIO GPIO_NUM_18
-#define USER_KEY_POLL_MS 20
-#define USER_KEY_DEBOUNCE_SAMPLES 3
-#define CLOCK_REFRESH_MS 1000
+#define USER_KEY_DEBOUNCE_MS 40
+#define CLOCK_REFRESH_FALLBACK_MS 5000
+
+static QueueHandle_t s_key_evt_queue;
+static int s_last_battery_percent = -1;
+static bool s_last_battery_ok;
 
 static int smooth_battery_percent(int raw_percent, bool usb_connected)
 {
@@ -61,7 +66,9 @@ static void env_task(void *arg)
         int raw_battery_pct = battery_pct;
         if (battery_ok) {
             battery_pct = smooth_battery_percent(battery_pct, usb_connected);
+            s_last_battery_percent = battery_pct;
         }
+        s_last_battery_ok = battery_ok;
         if (Lvgl_lock(-1)) {
             ui_app_set_env(t, h, ok);
             ui_app_set_battery(battery_pct, battery_ok, usb_connected);
@@ -94,6 +101,35 @@ static void env_task(void *arg)
     }
 }
 
+static void usb_status_task(void *arg)
+{
+    (void) arg;
+    bool last_usb_connected = usb_serial_jtag_is_connected();
+
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(USB_STATUS_WATCH_MS));
+
+        bool usb_connected = usb_serial_jtag_is_connected();
+        if (usb_connected == last_usb_connected) continue;
+        last_usb_connected = usb_connected;
+
+        int battery_pct = s_last_battery_percent >= 0 ? s_last_battery_percent : 0;
+        int battery_mv = 0;
+        bool battery_ok = (battery_read(&battery_pct, &battery_mv) == ESP_OK);
+        if (battery_ok) {
+            battery_pct = smooth_battery_percent(battery_pct, usb_connected);
+            s_last_battery_percent = battery_pct;
+        } else {
+            battery_ok = s_last_battery_ok;
+        }
+
+        if (Lvgl_lock(200)) {
+            ui_app_set_battery(battery_pct, battery_ok, usb_connected);
+            Lvgl_unlock();
+        }
+    }
+}
+
 static void on_ble_data(const usage_report_t *report)
 {
     if (Lvgl_lock(200)) {
@@ -105,22 +141,20 @@ static void on_ble_data(const usage_report_t *report)
 static void key_task(void *arg)
 {
     (void) arg;
-    bool was_pressed = false;
-    int stable_count = 0;
+    uint32_t gpio_num = 0;
 
     for (;;) {
-        bool pressed = (gpio_get_level(USER_KEY_GPIO) == 0);
-        if (pressed == was_pressed) {
-            stable_count = 0;
-        } else if (++stable_count >= USER_KEY_DEBOUNCE_SAMPLES) {
-            was_pressed = pressed;
-            stable_count = 0;
-            if (pressed && Lvgl_lock(200)) {
-                ui_app_toggle_activity();
-                Lvgl_unlock();
-            }
+        if (xQueueReceive(s_key_evt_queue, &gpio_num, portMAX_DELAY) != pdTRUE) continue;
+        (void) gpio_num;
+        vTaskDelay(pdMS_TO_TICKS(USER_KEY_DEBOUNCE_MS));
+        if (gpio_get_level(USER_KEY_GPIO) != 0) continue;
+        if (Lvgl_lock(200)) {
+            ui_app_toggle_activity();
+            Lvgl_unlock();
         }
-        vTaskDelay(pdMS_TO_TICKS(USER_KEY_POLL_MS));
+        while (gpio_get_level(USER_KEY_GPIO) == 0) {
+            vTaskDelay(pdMS_TO_TICKS(USER_KEY_DEBOUNCE_MS));
+        }
     }
 }
 
@@ -130,22 +164,42 @@ static void clock_task(void *arg)
     for (;;) {
         if (Lvgl_lock(200)) {
             ui_app_refresh_clock();
+            uint32_t delay_ms = ui_app_clock_delay_ms();
             Lvgl_unlock();
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(CLOCK_REFRESH_FALLBACK_MS));
         }
-        vTaskDelay(pdMS_TO_TICKS(CLOCK_REFRESH_MS));
     }
+}
+
+static void IRAM_ATTR key_isr_handler(void *arg)
+{
+    uint32_t gpio_num = (uint32_t)(uintptr_t)arg;
+    BaseType_t woken = pdFALSE;
+    xQueueSendFromISR(s_key_evt_queue, &gpio_num, &woken);
+    if (woken) portYIELD_FROM_ISR();
 }
 
 static void key_init(void)
 {
+    s_key_evt_queue = xQueueCreate(4, sizeof(uint32_t));
+    ESP_ERROR_CHECK(s_key_evt_queue ? ESP_OK : ESP_ERR_NO_MEM);
+
     gpio_config_t cfg = {
         .pin_bit_mask = 1ULL << USER_KEY_GPIO,
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
+    esp_err_t err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(err);
+    }
+    ESP_ERROR_CHECK(gpio_isr_handler_add(USER_KEY_GPIO, key_isr_handler,
+                                         (void *)(uintptr_t)USER_KEY_GPIO));
 }
 
 void UserApp_AppInit(void)
@@ -165,6 +219,7 @@ void UserApp_TaskInit(void)
     key_init();
     ESP_ERROR_CHECK(ble_app_init(on_ble_data));
     xTaskCreatePinnedToCore(env_task, "env", 4 * 1024, NULL, 3, NULL, 1);
+    xTaskCreatePinnedToCore(usb_status_task, "usb_status", 2 * 1024, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(key_task, "key", 2 * 1024, NULL, 4, NULL, 1);
     xTaskCreatePinnedToCore(clock_task, "clock", 2 * 1024, NULL, 2, NULL, 1);
 }

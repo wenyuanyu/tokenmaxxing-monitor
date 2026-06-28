@@ -9,6 +9,7 @@ APP_DIR="$SCRIPT_DIR/$APP_NAME.app"
 echo "Compiling $APP_NAME.swift …"
 swiftc -o "$SCRIPT_DIR/$APP_NAME" \
     -framework Cocoa \
+    -framework CoreBluetooth \
     -framework ServiceManagement \
     -framework SwiftUI \
     -target arm64-apple-macos12.0 \

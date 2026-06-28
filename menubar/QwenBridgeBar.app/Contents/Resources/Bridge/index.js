@@ -12,7 +12,8 @@ const BLE_DEVICE_NAMES = new Set(
 );
 const SERVICE_UUID = '00112233445566778899aabbccddeeff';
 const DATA_CHAR_UUID = '00112233445566778899aabbccddee01';
-const INTERVAL_MS = Number(process.env.QWEN_BLE_PUSH_MS ?? 1000);
+const INTERVAL_MS = Number(process.env.QWEN_BLE_PUSH_MS ?? 5000);
+const HEARTBEAT_MS = Number(process.env.QWEN_BLE_HEARTBEAT_MS ?? 60000);
 const RECENT_DAYS = Number(process.env.QWEN_BLE_SCAN_DAYS ?? 7);
 const ACTIVITY_DAYS = 26 * 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -20,7 +21,7 @@ const HISTORY_DAYS = Number(process.env.TOKEN_MONITOR_HISTORY_DAYS ?? 3650);
 const ACTIVE_GAP_MS = 5 * 60 * 1000;
 const STATUS_FILE = '/tmp/qwen-token-status.json';
 const WRITE_TIMEOUT_MS = Number(process.env.QWEN_BLE_WRITE_TIMEOUT_MS ?? 3000);
-const STALE_WRITE_MS = Number(process.env.QWEN_BLE_STALE_WRITE_MS ?? 10000);
+const STALE_WRITE_MS = Number(process.env.QWEN_BLE_STALE_WRITE_MS ?? Math.max(HEARTBEAT_MS * 2, 10000));
 const WAKE_GAP_MS = Number(process.env.QWEN_BLE_WAKE_GAP_MS ?? 15000);
 const DATA_SOURCE_NAMES = [
   ...new Set(
@@ -41,6 +42,7 @@ let connecting = false;
 let pushInFlight = false;
 let lastTickAt = 0;
 let lastSuccessfulWriteAt = 0;
+let lastStablePayloadKey = '';
 
 function resetBleConnection(reason) {
   if (reason) console.error(`[ble] resetting connection: ${reason}`);
@@ -629,6 +631,27 @@ function toPayload(r) {
   ].join('|');
 }
 
+function stablePayloadKey(r) {
+  return JSON.stringify({
+    todayTotal: r.todayTotal,
+    sessionsToday: r.sessionsToday,
+    todayCached: r.todayCached,
+    cacheRate: r.cacheRate,
+    activeMinutes: r.activeMinutes,
+    timezoneOffsetMinutes: r.timezoneOffsetMinutes,
+    models: r.models,
+    errorsToday: r.errorsToday,
+    todayOutput: r.todayOutput,
+    weekTotal: r.weekTotal,
+    todayInput: r.todayInput,
+    activity: r.activity,
+    lifetimeTotal: r.lifetimeTotal,
+    peakDailyTotal: r.peakDailyTotal,
+    streakDays: r.streakDays,
+    longestTaskMinutes: r.longestTaskMinutes,
+  });
+}
+
 function writeStatusFile(report) {
   const status = {
     ...report,
@@ -655,6 +678,10 @@ async function pushTick() {
   writeStatusFile(report);
   try {
     if (!dataChar) return;
+    const stableKey = stablePayloadKey(report);
+    const isHeartbeatDue = !lastSuccessfulWriteAt || startedAt - lastSuccessfulWriteAt >= HEARTBEAT_MS;
+    if (stableKey === lastStablePayloadKey && !isHeartbeatDue) return;
+
     if (lastSuccessfulWriteAt && startedAt - lastSuccessfulWriteAt > STALE_WRITE_MS) {
       resetBleConnection(`stale write ${startedAt - lastSuccessfulWriteAt}ms`);
       return;
@@ -668,6 +695,7 @@ async function pushTick() {
       });
     });
     lastSuccessfulWriteAt = Date.now();
+    lastStablePayloadKey = stableKey;
     console.log(`[ble] wrote ${payload}`);
   } catch (err) {
     resetBleConnection(err.message);
@@ -743,16 +771,18 @@ function connect(peripheral) {
 function startScan() {
   if (dataChar || connecting) return;
   clearTimeout(scanTimer);
-  if (noble.state !== 'poweredOn') {
+  if (noble.state !== 'poweredOn' && noble.state !== 'unknown') {
     console.error(`[ble] scan deferred, adapter state: ${noble.state}`);
     scanTimer = setTimeout(startScan, 5000);
     return;
   }
-  console.log(`[ble] scanning for ${[...BLE_DEVICE_NAMES].join(' or ')}`);
+  console.log(`[ble] scanning for ${[...BLE_DEVICE_NAMES].join(' or ')} (adapter state: ${noble.state})`);
   try {
     noble.startScanning([], false);
   } catch (e) {
     console.error('[ble] scan start failed:', e.message);
+    scanTimer = setTimeout(startScan, 5000);
+    return;
   }
   scanTimer = setTimeout(() => {
     noble.stopScanning();
@@ -779,6 +809,13 @@ noble.on('discover', (peripheral) => {
   if (!BLE_DEVICE_NAMES.has(name)) return;
   connect(peripheral);
 });
+
+if (noble.state === 'poweredOn') {
+  startScan();
+} else {
+  console.log(`[ble] waiting for adapter, state: ${noble.state}`);
+  scanTimer = setTimeout(startScan, 1000);
+}
 
 startPushLoop();
 

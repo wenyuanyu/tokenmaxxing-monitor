@@ -12,6 +12,8 @@
 #define BAT_ADC_BITWIDTH ADC_BITWIDTH_12
 #define BAT_DIVIDER_NUM 3
 #define BAT_SAMPLE_COUNT 8
+#define BAT_EMPTY_MV 2904
+#define BAT_FULL_MV 4056
 
 static adc_oneshot_unit_handle_t s_adc;
 static adc_cali_handle_t s_cali;
@@ -26,9 +28,9 @@ static int clamp_int(int v, int lo, int hi)
 
 static int lipo_percent_from_mv(int mv)
 {
-    if (mv < 3000) return 0;
-    if (mv > 4120) return 100;
-    return (mv - 3000) * 100 / (4120 - 3000);
+    if (mv <= BAT_EMPTY_MV) return 0;
+    if (mv >= BAT_FULL_MV) return 100;
+    return (mv - BAT_EMPTY_MV) * 100 / (BAT_FULL_MV - BAT_EMPTY_MV);
 }
 
 esp_err_t battery_init(void)

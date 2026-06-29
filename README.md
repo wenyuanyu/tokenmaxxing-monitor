@@ -183,7 +183,9 @@ Important environment variables:
 | `TOKEN_MONITOR_DATASOURCES` | `qwen` | Comma-separated sources to aggregate |
 | `TOKEN_MONITOR_HISTORY_DAYS` | `3650` | History window used for lifetime, peak, streak, and longest task |
 | `QWEN_BLE_DEVICE_NAME` | `QwenToken,Qwen Usage` | Comma-separated BLE names to connect to |
-| `QWEN_BLE_PUSH_MS` | `1000` | BLE push interval |
+| `QWEN_BLE_PUSH_MS` | `5000` | Bridge aggregation tick; BLE writes are skipped until data changes or heartbeat is due |
+| `QWEN_BLE_HEARTBEAT_MS` | `60000` | Maximum interval between unchanged BLE payload writes |
+| `QWEN_BLE_CONNECT_TIMEOUT_RESTARTS` | `3` | Exit after this many consecutive BLE connect timeouts so LaunchAgent/launchd can restart CoreBluetooth state; set `0` to disable |
 | `QWEN_BLE_SCAN_DAYS` | `7` | Recent window for week/current metrics |
 | `QWEN_RUNTIME_DIR` | derived from `~/.qwen/.env` | Qwen runtime directory |
 | `CODEX_HOME` | `~/.codex` | Codex home directory |

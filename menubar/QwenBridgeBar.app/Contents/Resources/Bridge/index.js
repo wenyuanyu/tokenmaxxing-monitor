@@ -23,6 +23,7 @@ const STATUS_FILE = '/tmp/qwen-token-status.json';
 const WRITE_TIMEOUT_MS = Number(process.env.QWEN_BLE_WRITE_TIMEOUT_MS ?? 3000);
 const STALE_WRITE_MS = Number(process.env.QWEN_BLE_STALE_WRITE_MS ?? Math.max(HEARTBEAT_MS * 2, 10000));
 const WAKE_GAP_MS = Number(process.env.QWEN_BLE_WAKE_GAP_MS ?? 15000);
+const CONNECT_TIMEOUT_RESTARTS = Number(process.env.QWEN_BLE_CONNECT_TIMEOUT_RESTARTS ?? 3);
 const DATA_SOURCE_NAMES = [
   ...new Set(
     (process.env.TOKEN_MONITOR_DATASOURCES ?? process.env.QWEN_BLE_DATASOURCES ?? 'qwen')
@@ -43,6 +44,7 @@ let pushInFlight = false;
 let lastTickAt = 0;
 let lastSuccessfulWriteAt = 0;
 let lastStablePayloadKey = '';
+let consecutiveConnectTimeouts = 0;
 
 function resetBleConnection(reason) {
   if (reason) console.error(`[ble] resetting connection: ${reason}`);
@@ -51,12 +53,24 @@ function resetBleConnection(reason) {
   bleDevice = '';
   connecting = false;
   lastSuccessfulWriteAt = 0;
+  consecutiveConnectTimeouts = 0;
   const peripheral = connectedPeripheral;
   connectedPeripheral = null;
   if (peripheral) {
     try { peripheral.disconnect(); } catch {}
   }
   startScan();
+}
+
+function restartAfterConnectTimeout() {
+  if (CONNECT_TIMEOUT_RESTARTS <= 0) return false;
+  consecutiveConnectTimeouts += 1;
+  if (consecutiveConnectTimeouts < CONNECT_TIMEOUT_RESTARTS) return false;
+
+  console.error(`[ble] ${consecutiveConnectTimeouts} consecutive connect timeouts, exiting for launchd restart`);
+  try { noble.stopScanning(); } catch {}
+  setTimeout(() => process.exit(75), 250);
+  return true;
 }
 
 function parseEnvFile(file) {
@@ -735,6 +749,7 @@ function connect(peripheral) {
     console.error('[ble] connect timeout');
     try { peripheral.disconnect(); } catch {}
     connecting = false;
+    if (restartAfterConnectTimeout()) return;
     startScan();
   }, 10000);
 
@@ -746,6 +761,7 @@ function connect(peripheral) {
       startScan();
       return;
     }
+    consecutiveConnectTimeouts = 0;
     connectedPeripheral = peripheral;
     bleDevice = peripheral.advertisement.localName ?? 'unknown';
     peripheral.once('disconnect', () => {

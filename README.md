@@ -2,7 +2,7 @@
 
 English | [中文](README.zh-CN.md)
 
-TokenMaxxing RLCD is a local-first token activity meter for AI coding agents. A
+TokenMaxxing Monitor is a local-first token activity meter for AI coding agents. A
 Node.js bridge aggregates token usage from configured data sources, pushes a
 compact BLE payload to a Waveshare ESP32-S3-RLCD-4.2 board, and mirrors the same
 state to a macOS menu bar app.

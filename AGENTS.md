@@ -104,11 +104,12 @@ The activity field is packed as 26 columns x 7 rows:
 
 ## Verification Commands
 
-Bridge syntax:
+Bridge syntax + unit tests:
 
 ```bash
 cd bridge
 node --check src/index.js
+npm test
 ```
 
 Firmware build:
@@ -132,11 +133,13 @@ cd tools/lvgl_preview
 bash render.sh
 ```
 
-macOS menu bar app:
+macOS menu bar app (the `.app` bundle is gitignored — always built locally):
 
 ```bash
 cd menubar
-bash build.sh dmg
+bash build.sh           # builds QwenBridgeBar.app from Swift + bridge/src
+bash build.sh verify    # checks bundled bridge matches source (drift guard)
+bash build.sh dmg       # also produces QwenBridgeBar.dmg
 ```
 
 ## Common Pitfalls
@@ -147,5 +150,6 @@ bash build.sh dmg
 - The RLCD is 1-bit. Do not use RGB gray values expecting true grayscale.
 - The preview PPM shows LVGL color output; hardware dithering in `main.cpp`
   happens at flush time.
-- The generated `.app` and DMG are build artifacts. Keep source changes in
-  Swift/build scripts, not only inside an already-built app bundle.
+- The generated `.app` and DMG are build artifacts and are gitignored. Source
+  of truth is `menubar/QwenBridgeBar.swift` + `bridge/src/`. Rebuild with
+  `bash menubar/build.sh` and verify drift with `bash menubar/build.sh verify`.

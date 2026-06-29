@@ -145,6 +145,9 @@ Bridge 同时会写状态文件：
 
 ### 3. 可选：macOS 菜单栏 App
 
+`.app` 是构建产物，不入库。先在 `bridge/` 下执行 `npm install` 生成
+`node_modules`，再构建：
+
 ```bash
 cd menubar
 bash build.sh dmg

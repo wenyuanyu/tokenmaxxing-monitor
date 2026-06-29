@@ -145,6 +145,9 @@ The bridge also writes:
 
 ### 3. Optional macOS Menu Bar App
 
+The `.app` bundle is a build artifact and is not checked in. Run
+`bridge/npm install` first so the bridge `node_modules` exists, then build:
+
 ```bash
 cd menubar
 bash build.sh dmg

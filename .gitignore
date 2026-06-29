@@ -31,8 +31,8 @@ outputs/
 # DMG build artifact
 *.dmg
 
-# Bundled bridge node_modules (build artifact)
-menubar/QwenBridgeBar.app/Contents/Resources/Bridge/node_modules/
+# macOS menu bar app build artifact (rebuild with `bash menubar/build.sh`)
+menubar/QwenBridgeBar.app/
 
 # Local Claude Code permissions
 .claude/settings.local.json

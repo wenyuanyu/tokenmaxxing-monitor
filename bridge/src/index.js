@@ -45,6 +45,7 @@ const WRITE_TIMEOUT_MS = Number(process.env.QWEN_BLE_WRITE_TIMEOUT_MS ?? 3000);
 const STALE_WRITE_MS = Number(process.env.QWEN_BLE_STALE_WRITE_MS ?? Math.max(HEARTBEAT_MS * 2, 10000));
 const WAKE_GAP_MS = Number(process.env.QWEN_BLE_WAKE_GAP_MS ?? 15000);
 const CONNECT_TIMEOUT_RESTARTS = Number(process.env.QWEN_BLE_CONNECT_TIMEOUT_RESTARTS ?? 3);
+const SCAN_STUCK_RESTART_MS = Number(process.env.QWEN_BLE_SCAN_STUCK_RESTART_MS ?? 180000);
 const DATA_SOURCE_NAMES = [
   ...new Set(
     (process.env.TOKEN_MONITOR_DATASOURCES ?? process.env.QWEN_BLE_DATASOURCES ?? 'qwen')
@@ -66,6 +67,7 @@ let lastTickAt = 0;
 let lastSuccessfulWriteAt = 0;
 let lastStablePayloadKey = '';
 let consecutiveConnectTimeouts = 0;
+let scanningSinceAt = 0;
 
 function resetBleConnection(reason) {
   if (reason) console.error(`[ble] resetting connection: ${reason}`);
@@ -83,14 +85,18 @@ function resetBleConnection(reason) {
   startScan();
 }
 
+function restartBridge(reason) {
+  console.error(`[ble] ${reason}, exiting for launchd restart`);
+  try { noble.stopScanning(); } catch {}
+  setTimeout(() => process.exit(75), 250);
+}
+
 function restartAfterConnectTimeout() {
   if (CONNECT_TIMEOUT_RESTARTS <= 0) return false;
   consecutiveConnectTimeouts += 1;
   if (consecutiveConnectTimeouts < CONNECT_TIMEOUT_RESTARTS) return false;
 
-  console.error(`[ble] ${consecutiveConnectTimeouts} consecutive connect timeouts, exiting for launchd restart`);
-  try { noble.stopScanning(); } catch {}
-  setTimeout(() => process.exit(75), 250);
+  restartBridge(`${consecutiveConnectTimeouts} consecutive connect timeouts`);
   return true;
 }
 
@@ -669,6 +675,7 @@ async function discoverCharacteristic(peripheral) {
 function connect(peripheral) {
   if (connecting || dataChar) return;
   connecting = true;
+  scanningSinceAt = 0;
   clearTimeout(scanTimer);
   noble.stopScanning();
   console.log(`[ble] connecting ${peripheral.advertisement.localName ?? peripheral.id}`);
@@ -717,7 +724,14 @@ function startScan() {
   clearTimeout(scanTimer);
   if (noble.state !== 'poweredOn' && noble.state !== 'unknown') {
     console.error(`[ble] scan deferred, adapter state: ${noble.state}`);
+    scanningSinceAt = 0;
     scanTimer = setTimeout(startScan, 5000);
+    return;
+  }
+  const now = Date.now();
+  if (!scanningSinceAt) scanningSinceAt = now;
+  if (SCAN_STUCK_RESTART_MS > 0 && now - scanningSinceAt >= SCAN_STUCK_RESTART_MS) {
+    restartBridge(`scan stuck for ${now - scanningSinceAt}ms without seeing ${[...BLE_DEVICE_NAMES].join(' or ')}`);
     return;
   }
   console.log(`[ble] scanning for ${[...BLE_DEVICE_NAMES].join(' or ')} (adapter state: ${noble.state})`);
@@ -743,6 +757,7 @@ noble.on('stateChange', (state) => {
     bleConnected = false;
     connecting = false;
     lastSuccessfulWriteAt = 0;
+    scanningSinceAt = 0;
     clearTimeout(scanTimer);
     noble.stopScanning();
   }
@@ -751,6 +766,7 @@ noble.on('stateChange', (state) => {
 noble.on('discover', (peripheral) => {
   const name = peripheral.advertisement.localName;
   if (!BLE_DEVICE_NAMES.has(name)) return;
+  scanningSinceAt = 0;
   connect(peripheral);
 });
 

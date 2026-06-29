@@ -37,7 +37,7 @@ Activity cell 使用 5 档单色纹理。RLCD 实际按 1-bit 输出，不是真
 ## 架构
 
 ```text
-Qwen Code / Codex logs
+Qwen Code / Codex / Claude Code logs
         |
         v
 bridge/src/index.js
@@ -124,7 +124,7 @@ idf.py -DRLCD_GREETING_NAME="YourName" -DRLCD_BLE_DEVICE_NAME="QwenToken" -p /de
 ```bash
 cd bridge
 npm install
-TOKEN_MONITOR_DATASOURCES=qwen,codex QWEN_BLE_DEVICE_NAME=QwenToken npm start
+TOKEN_MONITOR_DATASOURCES=qwen,codex,claude QWEN_BLE_DEVICE_NAME=QwenToken npm start
 ```
 
 看到下面日志表示连接成功：
@@ -165,7 +165,7 @@ menubar/QwenBridgeBar.dmg
 用环境变量配置数据源：
 
 ```bash
-TOKEN_MONITOR_DATASOURCES=qwen,codex
+TOKEN_MONITOR_DATASOURCES=qwen,codex,claude
 ```
 
 当前支持：
@@ -174,6 +174,7 @@ TOKEN_MONITOR_DATASOURCES=qwen,codex
 | --- | --- |
 | `qwen` | Qwen runtime usage 目录下的月度 JSONL usage 文件 |
 | `codex` | `$CODEX_HOME/sessions` 下的 Codex rollout JSONL 文件 |
+| `claude` | `$CLAUDE_HOME/projects/*/` 下的 Claude Code 会话 JSONL 文件 |
 
 常用环境变量：
 
@@ -190,6 +191,8 @@ TOKEN_MONITOR_DATASOURCES=qwen,codex
 | `CODEX_HOME` | `~/.codex` | Codex 主目录 |
 | `CODEX_SESSIONS_DIR` | `$CODEX_HOME/sessions` | Codex rollout 目录 |
 | `CODEX_STATE_DB` | `$CODEX_HOME/state_5.sqlite` | 可选，用于读取 Codex thread 的模型名 |
+| `CLAUDE_HOME` | `~/.claude` | Claude Code 主目录 |
+| `CLAUDE_PROJECTS_DIR` | `$CLAUDE_HOME/projects` | Claude Code 各项目会话目录 |
 
 ## BLE 协议
 

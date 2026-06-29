@@ -39,7 +39,7 @@ Activity cells use five monochrome shades because the RLCD is effectively 1-bit:
 ## Architecture
 
 ```text
-Qwen Code / Codex logs
+Qwen Code / Codex / Claude Code logs
         |
         v
 bridge/src/index.js
@@ -124,7 +124,7 @@ Prerequisites:
 ```bash
 cd bridge
 npm install
-TOKEN_MONITOR_DATASOURCES=qwen,codex QWEN_BLE_DEVICE_NAME=QwenToken npm start
+TOKEN_MONITOR_DATASOURCES=qwen,codex,claude QWEN_BLE_DEVICE_NAME=QwenToken npm start
 ```
 
 Expected logs:
@@ -166,7 +166,7 @@ menubar/QwenBridgeBar.dmg
 Configure data sources with:
 
 ```bash
-TOKEN_MONITOR_DATASOURCES=qwen,codex
+TOKEN_MONITOR_DATASOURCES=qwen,codex,claude
 ```
 
 Supported readers:
@@ -175,6 +175,7 @@ Supported readers:
 | --- | --- |
 | `qwen` | monthly Qwen usage JSONL files under the Qwen runtime usage directory |
 | `codex` | Codex rollout JSONL files under `$CODEX_HOME/sessions` |
+| `claude` | Claude Code session JSONL files under `$CLAUDE_HOME/projects/*/` |
 
 Important environment variables:
 
@@ -191,6 +192,8 @@ Important environment variables:
 | `CODEX_HOME` | `~/.codex` | Codex home directory |
 | `CODEX_SESSIONS_DIR` | `$CODEX_HOME/sessions` | Codex session rollout directory |
 | `CODEX_STATE_DB` | `$CODEX_HOME/state_5.sqlite` | Optional Codex thread model-name lookup |
+| `CLAUDE_HOME` | `~/.claude` | Claude Code home directory |
+| `CLAUDE_PROJECTS_DIR` | `$CLAUDE_HOME/projects` | Claude Code per-project session directory |
 
 ## BLE Protocol
 

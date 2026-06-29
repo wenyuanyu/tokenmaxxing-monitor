@@ -33,3 +33,7 @@ outputs/
 
 # Bundled bridge node_modules (build artifact)
 menubar/QwenBridgeBar.app/Contents/Resources/Bridge/node_modules/
+
+# Local Claude Code permissions
+.claude/settings.local.json
+CLAUDE.md

@@ -116,6 +116,44 @@ function codexHome() {
   return process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
 }
 
+function claudeProjectsDir() {
+  const home = process.env.CLAUDE_HOME ?? path.join(os.homedir(), '.claude');
+  return process.env.CLAUDE_PROJECTS_DIR ?? path.join(home, 'projects');
+}
+
+function claudeSessionFiles() {
+  const root = claudeProjectsDir();
+  const cutoff = Date.now() - (Math.max(RECENT_DAYS, ACTIVITY_DAYS, HISTORY_DAYS) + 1) * 24 * 60 * 60 * 1000;
+  const files = [];
+
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!ent.isFile() || !ent.name.endsWith('.jsonl')) continue;
+      try {
+        const stat = fs.statSync(full);
+        if (stat.mtimeMs >= cutoff) files.push({ file: full, stat });
+      } catch {
+        // Ignore files that rotate while scanning.
+      }
+    }
+  };
+
+  walk(root);
+  return files.sort((a, b) => a.stat.mtimeMs - b.stat.mtimeMs);
+}
+
 function codexSessionFiles() {
   const root = process.env.CODEX_SESSIONS_DIR ?? path.join(codexHome(), 'sessions');
   const cutoff = Date.now() - (Math.max(RECENT_DAYS, ACTIVITY_DAYS, HISTORY_DAYS) + 1) * 24 * 60 * 60 * 1000;
@@ -518,6 +556,88 @@ function codexReport() {
   return totals;
 }
 
+function claudeSessionIdFromFile(file) {
+  return path.basename(file).match(/([0-9a-fA-F-]{36})\.jsonl$/)?.[1] ?? file;
+}
+
+function claudeReport() {
+  const { todayStartMs, weekCutoffMs } = todayInfo();
+  const files = claudeSessionFiles();
+  const totals = emptyTotals('claude');
+
+  for (const { file } of files) {
+    const fileSessionId = claudeSessionIdFromFile(file);
+    let content;
+    try {
+      content = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+
+    for (const line of content.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      let rec;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (rec.type !== 'assistant') continue;
+      const msg = rec.message;
+      if (!msg || msg.role !== 'assistant') continue;
+      const usage = msg.usage;
+      if (!usage) continue;
+
+      const rawModel = msg.model ?? '';
+      if (rawModel === '<synthetic>') continue;
+      const model = safeModelName(rawModel, 'claude');
+
+      const input = usageNumber(usage, 'input_tokens');
+      const cacheCreate = usageNumber(usage, 'cache_creation_input_tokens');
+      const cacheRead = usageNumber(usage, 'cache_read_input_tokens');
+      const output = usageNumber(usage, 'output_tokens');
+      const inputTotal = input + cacheCreate + cacheRead;
+      const total = inputTotal + output;
+      if (total <= 0) continue;
+
+      const ts = Date.parse(rec.timestamp ?? '');
+      if (!Number.isFinite(ts)) continue;
+      const sessionId = String(rec.sessionId ?? fileSessionId);
+
+      addTaskEvent(totals, sessionId, ts);
+      addDailyTokens(totals, localDateKey(ts), total);
+
+      const isToday = ts >= todayStartMs;
+      const isWeek = ts >= weekCutoffMs;
+
+      if (isToday) {
+        totals.callsToday++;
+        totals.todaySessions.add(sessionId);
+        addSessionEvent(totals, sessionId, ts);
+        totals.todayTotal += total;
+        totals.todayInput += inputTotal;
+        totals.todayOutput += output;
+        totals.todayCached += cacheRead;
+        totals.modelTotals.set(model, (totals.modelTotals.get(model) ?? 0) + total);
+      }
+
+      if (isWeek) {
+        totals.weekTotal += total;
+      }
+
+      setLatest(totals, {
+        ts,
+        input: inputTotal,
+        total,
+        model,
+      });
+    }
+  }
+
+  return totals;
+}
+
 function activityLevel(tokens) {
   if (tokens === 0) return 0;
   if (tokens < 1000000) return 1;
@@ -596,6 +716,7 @@ function buildReport() {
   const readers = {
     qwen: qwenReport,
     codex: codexReport,
+    claude: claudeReport,
   };
 
   for (const name of DATA_SOURCE_NAMES) {

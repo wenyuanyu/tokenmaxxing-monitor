@@ -209,7 +209,7 @@ class StatusManager: ObservableObject {
             <key>WorkingDirectory</key><string>\(bridgeDir)</string>
             <key>EnvironmentVariables</key>
             <dict>
-                <key>TOKEN_MONITOR_DATASOURCES</key><string>qwen,codex</string>
+                <key>TOKEN_MONITOR_DATASOURCES</key><string>qwen,codex,claude</string>
                 <key>QWEN_BLE_DEVICE_NAME</key><string>\(name)</string>
             </dict>
             <key>StandardOutPath</key><string>\(LOG_FILE)</string>

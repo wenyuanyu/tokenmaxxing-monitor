@@ -84,7 +84,7 @@ firmware
 
 Target board:
 
-- [Waveshare ESP32-S3-RLCD-4.2](https://www.waveshare.com/wiki/ESP32-S3-RLCD-4.2)
+- [Waveshare ESP32-S3-RLCD-4.2](https://docs.waveshare.com/ESP32-S3-RLCD-4.2)
 - ESP32-S3 with BLE
 - 400 x 300 reflective LCD
 - Onboard SHTC3 temperature/humidity sensor

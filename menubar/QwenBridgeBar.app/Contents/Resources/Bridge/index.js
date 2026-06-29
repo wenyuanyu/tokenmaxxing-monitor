@@ -640,8 +640,8 @@ function claudeReport() {
 
 function activityLevel(tokens) {
   if (tokens === 0) return 0;
-  if (tokens < 1000000) return 1;
-  if (tokens < 10000000) return 2;
+  if (tokens < 10000000) return 1;
+  if (tokens < 50000000) return 2;
   if (tokens < 100000000) return 3;
   return 4;
 }

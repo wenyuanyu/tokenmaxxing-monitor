@@ -60,9 +60,9 @@ Aggregation rules:
 - activity window is 26 x 7 days
 - level buckets:
   - `0`: `0`
-  - `1`: `(0, 1M)`
-  - `2`: `[1M, 10M)`
-  - `3`: `[10M, 100M)`
+  - `1`: `(0, 10M)`
+  - `2`: `[10M, 50M)`
+  - `3`: `[50M, 100M)`
   - `4`: `[100M, +inf)`
 - lifetime, peak, streak, and longest task are computed over
   `TOKEN_MONITOR_HISTORY_DAYS` days, default `3650`

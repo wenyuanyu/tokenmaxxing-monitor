@@ -31,9 +31,9 @@ Activity cells use five monochrome shades because the RLCD is effectively 1-bit:
 | Level | Meaning | Pattern |
 | --- | --- | --- |
 | 0 | `0` tokens | blank |
-| 1 | `(0, 1M)` | `░`, about 1/3 black |
-| 2 | `[1M, 10M)` | `▒`, 1/2 black |
-| 3 | `[10M, 100M)` | `▓`, about 2/3 black |
+| 1 | `(0, 10M)` | `░`, about 1/3 black |
+| 2 | `[10M, 50M)` | `▒`, 1/2 black |
+| 3 | `[50M, 100M)` | `▓`, about 2/3 black |
 | 4 | `[100M, +inf)` | `█`, all black |
 
 ## Architecture

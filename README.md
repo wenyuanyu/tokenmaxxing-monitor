@@ -190,7 +190,7 @@ Important environment variables:
 | `QWEN_BLE_PUSH_MS` | `5000` | Bridge aggregation tick; BLE writes are skipped until data changes or heartbeat is due |
 | `QWEN_BLE_HEARTBEAT_MS` | `60000` | Maximum interval between unchanged BLE payload writes |
 | `QWEN_BLE_CONNECT_TIMEOUT_RESTARTS` | `3` | Exit after this many consecutive BLE connect timeouts so LaunchAgent/launchd can restart CoreBluetooth state; set `0` to disable |
-| `QWEN_BLE_SCAN_STUCK_RESTART_MS` | `180000` | Exit after scanning this long without seeing the device so LaunchAgent/launchd can recover a stuck macOS BLE scan; set `0` to disable |
+| `QWEN_BLE_SCAN_STUCK_RESTART_MS` | `0` | Optional fallback: exit after scanning this long without seeing the device so LaunchAgent/launchd can recover a stuck macOS BLE scan; disabled by default because being away from the device is normal |
 | `QWEN_BLE_SCAN_DAYS` | `7` | Recent window for week/current metrics |
 | `QWEN_RUNTIME_DIR` | derived from `~/.qwen/.env` | Qwen runtime directory |
 | `CODEX_HOME` | `~/.codex` | Codex home directory |

@@ -269,6 +269,11 @@ class StatusManager: ObservableObject {
         doStart()
     }
 
+    func doRestartAfterWake() {
+        if !bridgeShouldRun { return }
+        doRestart()
+    }
+
     func applyBleDeviceName() {
         UserDefaults.standard.set(bleDeviceName, forKey: "bleDeviceName")
         doRestart()
@@ -515,6 +520,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     let manager = StatusManager()
+    private var wakeRestartWorkItem: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -545,6 +551,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             self.manager.doStart()
         }
+
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(systemWillSleep),
+            name: NSWorkspace.willSleepNotification,
+            object: nil
+        )
+        workspaceNotifications.addObserver(
+            self,
+            selector: #selector(systemDidWake),
+            name: NSWorkspace.didWakeNotification,
+            object: nil
+        )
+    }
+
+    @objc func systemWillSleep() {
+        print("[bridge] system will sleep")
+        wakeRestartWorkItem?.cancel()
+        wakeRestartWorkItem = nil
+    }
+
+    @objc func systemDidWake() {
+        print("[bridge] system did wake, scheduling BLE bridge restart")
+        wakeRestartWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [manager] in
+            print("[bridge] restarting after wake")
+            manager.doRestartAfterWake()
+        }
+        wakeRestartWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
     }
 
     @objc func togglePopover() {
@@ -566,6 +603,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ n: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        wakeRestartWorkItem?.cancel()
         manager.doStop()
         manager.stop()
     }

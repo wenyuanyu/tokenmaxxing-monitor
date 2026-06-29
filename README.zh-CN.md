@@ -189,7 +189,7 @@ TOKEN_MONITOR_DATASOURCES=qwen,codex,claude
 | `QWEN_BLE_PUSH_MS` | `5000` | bridge 聚合 tick；BLE 只有数据变化或 heartbeat 到期才实际写入 |
 | `QWEN_BLE_HEARTBEAT_MS` | `60000` | payload 不变时的最大 BLE heartbeat 间隔 |
 | `QWEN_BLE_CONNECT_TIMEOUT_RESTARTS` | `3` | 连续 BLE connect timeout 到达该次数后退出，让 LaunchAgent/launchd 重启 CoreBluetooth 状态；设为 `0` 可关闭 |
-| `QWEN_BLE_SCAN_STUCK_RESTART_MS` | `180000` | 持续扫描这么久仍看不到设备时退出，让 LaunchAgent/launchd 恢复卡住的 macOS BLE 扫描；设为 `0` 可关闭 |
+| `QWEN_BLE_SCAN_STUCK_RESTART_MS` | `0` | 可选兜底：持续扫描这么久仍看不到设备时退出，让 LaunchAgent/launchd 恢复卡住的 macOS BLE 扫描；默认关闭，因为离开设备附近是正常状态 |
 | `QWEN_BLE_SCAN_DAYS` | `7` | 最近窗口，用于 week/current 指标 |
 | `QWEN_RUNTIME_DIR` | 从 `~/.qwen/.env` 推导 | Qwen runtime 目录 |
 | `CODEX_HOME` | `~/.codex` | Codex 主目录 |

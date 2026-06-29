@@ -45,7 +45,7 @@ const WRITE_TIMEOUT_MS = Number(process.env.QWEN_BLE_WRITE_TIMEOUT_MS ?? 3000);
 const STALE_WRITE_MS = Number(process.env.QWEN_BLE_STALE_WRITE_MS ?? Math.max(HEARTBEAT_MS * 2, 10000));
 const WAKE_GAP_MS = Number(process.env.QWEN_BLE_WAKE_GAP_MS ?? 15000);
 const CONNECT_TIMEOUT_RESTARTS = Number(process.env.QWEN_BLE_CONNECT_TIMEOUT_RESTARTS ?? 3);
-const SCAN_STUCK_RESTART_MS = Number(process.env.QWEN_BLE_SCAN_STUCK_RESTART_MS ?? 180000);
+const SCAN_STUCK_RESTART_MS = Number(process.env.QWEN_BLE_SCAN_STUCK_RESTART_MS ?? 0);
 const DATA_SOURCE_NAMES = [
   ...new Set(
     (process.env.TOKEN_MONITOR_DATASOURCES ?? process.env.QWEN_BLE_DATASOURCES ?? 'qwen')

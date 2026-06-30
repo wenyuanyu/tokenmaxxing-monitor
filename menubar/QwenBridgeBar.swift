@@ -79,6 +79,7 @@ final class BleDeviceScanner: NSObject, ObservableObject, CBCentralManagerDelega
 
     func stop() {
         central?.stopScan()
+        devices = []
         scanning = false
     }
 
@@ -627,12 +628,16 @@ struct DashboardView: View {
                         .onChange(of: manager.bleDeviceName) { value in
                             if bleNameFocused { scanner.updatePrefix(value) }
                         }
-                    Button(manager.bridgeBusy ? "Applying" : "Apply") { manager.applyBleDeviceName() }
+                    Button(manager.bridgeBusy ? "Applying" : "Apply") {
+                        bleNameFocused = false
+                        scanner.stop()
+                        manager.applyBleDeviceName()
+                    }
                         .font(.system(size: 11))
                         .disabled(manager.bridgeBusy)
                 }
 
-                if bleNameFocused || scanner.scanning || !scanner.devices.isEmpty {
+                if bleNameFocused {
                     VStack(spacing: 4) {
                         HStack(spacing: 6) {
                             if scanner.scanning && scanner.bluetoothReady {
@@ -650,6 +655,7 @@ struct DashboardView: View {
                         ForEach(scanner.devices.prefix(4)) { device in
                             Button {
                                 manager.bleDeviceName = device.name
+                                bleNameFocused = false
                                 scanner.stop()
                             } label: {
                                 HStack {
@@ -675,6 +681,10 @@ struct DashboardView: View {
                 }
             }
             .padding(.vertical, 6)
+            .onAppear {
+                bleNameFocused = false
+                scanner.stop()
+            }
 
             // ── Launch at Login ──
             HStack {

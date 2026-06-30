@@ -105,7 +105,7 @@ cd firmware
 cp main/secrets.h.example main/secrets.h
 source ~/esp/esp-idf/export.sh
 idf.py set-target esp32s3
-idf.py -DRLCD_GREETING_NAME="YourName" -DRLCD_BLE_DEVICE_NAME="QwenToken" -p /dev/cu.usbmodem* build flash
+idf.py -DRLCD_GREETING_NAME="YourName" -p /dev/cu.usbmodem* build flash
 ```
 
 Notes:
@@ -124,15 +124,15 @@ Prerequisites:
 ```bash
 cd bridge
 npm install
-TOKEN_MONITOR_DATASOURCES=qwen,codex,claude QWEN_BLE_DEVICE_NAME=QwenToken npm start
+TOKEN_MONITOR_DATASOURCES=qwen,codex,claude QWEN_BLE_DEVICE_NAME=QwenToken_XXXX npm start
 ```
 
 Expected logs:
 
 ```text
 [ble] adapter state: poweredOn
-[ble] scanning for QwenToken
-[ble] connecting QwenToken
+[ble] scanning for QwenToken_XXXX
+[ble] connecting QwenToken_XXXX
 [ble] ready
 [ble] wrote 3|...
 ```
@@ -186,7 +186,7 @@ Important environment variables:
 | --- | --- | --- |
 | `TOKEN_MONITOR_DATASOURCES` | `qwen` | Comma-separated sources to aggregate |
 | `TOKEN_MONITOR_HISTORY_DAYS` | `3650` | History window used for lifetime, peak, streak, and longest task |
-| `QWEN_BLE_DEVICE_NAME` | `QwenToken,Qwen Usage` | Comma-separated BLE names to connect to |
+| `QWEN_BLE_DEVICE_NAME` | `QwenToken,Qwen Usage` | Comma-separated exact BLE names to connect to. For default firmware, use the full `QwenToken_XXXX` shown on the screen bottom line. |
 | `QWEN_BLE_PUSH_MS` | `5000` | Bridge aggregation tick; BLE writes are skipped until data changes or heartbeat is due |
 | `QWEN_BLE_HEARTBEAT_MS` | `60000` | Maximum interval between unchanged BLE payload writes |
 | `QWEN_BLE_CONNECT_TIMEOUT_RESTARTS` | `3` | Exit after this many consecutive BLE connect timeouts so LaunchAgent/launchd can restart CoreBluetooth state; set `0` to disable |
@@ -298,7 +298,7 @@ If the BLE payload fields do not change, firmware does not need to be touched.
 
 ### The bridge scans forever
 
-- Make sure the flashed BLE name matches `QWEN_BLE_DEVICE_NAME`.
+- Make sure the BLE name shown on the screen bottom line matches `QWEN_BLE_DEVICE_NAME` exactly.
 - Keep the board powered and within BLE range.
 - BLE devices may not appear in macOS Bluetooth Settings; use bridge logs.
 

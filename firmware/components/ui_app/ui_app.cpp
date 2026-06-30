@@ -43,6 +43,7 @@ static lv_obj_t *lbl_rate;
 static lv_obj_t *lbl_week;
 static lv_obj_t *lbl_battery_pct;
 static lv_obj_t *battery_bolt;
+static lv_obj_t *lbl_ble_name;
 static lv_obj_t *bar_goal;
 static lv_obj_t *lbl_goal;
 static lv_obj_t *page_activity;
@@ -55,6 +56,7 @@ static lv_obj_t *lbl_activity_streak;
 static lv_obj_t *lbl_activity_longest_task;
 static lv_obj_t *lbl_activity_battery_pct;
 static lv_obj_t *activity_battery_bolt;
+static lv_obj_t *lbl_activity_ble_name;
 static lv_obj_t *activity_month_labels[8];
 static lv_obj_t *activity_cells[26][7];
 static bool s_activity_visible;
@@ -584,6 +586,8 @@ static void create_activity_page(lv_obj_t *s)
                                        &lv_font_montserrat_14, "--%");
     activity_battery_bolt = bolt(page_activity, 336, 276);
     lv_obj_add_flag(activity_battery_bolt, LV_OBJ_FLAG_HIDDEN);
+    lbl_activity_ble_name = aligned(page_activity, 12, 282, 250, LV_TEXT_ALIGN_LEFT,
+                                    &lv_font_montserrat_12, "BLE Name: --");
 }
 
 void ui_app_init(void)
@@ -640,6 +644,8 @@ void ui_app_init(void)
 
     divider(s, 12, 256, 244, 1);
     label(s, 12, 264, &lv_font_montserrat_12, "QwenCode/Codex/Claude/Qoder/Claw");
+    lbl_ble_name = aligned(s, 12, 282, 250, LV_TEXT_ALIGN_LEFT,
+                           &lv_font_montserrat_12, "BLE Name: --");
 
     /* ── vertical divider ── */
     divider(s, 268, 42, 2, 234);
@@ -825,6 +831,14 @@ void ui_app_set_time(const char *hm)
 {
     if (hm && hm[0]) lv_label_set_text(lbl_time, hm);
     if (hm && hm[0] && lbl_activity_time) lv_label_set_text(lbl_activity_time, hm);
+}
+
+void ui_app_set_ble_name(const char *name)
+{
+    char b[48];
+    snprintf(b, sizeof(b), "BLE Name: %s", (name && name[0]) ? name : "--");
+    if (lbl_ble_name) lv_label_set_text(lbl_ble_name, b);
+    if (lbl_activity_ble_name) lv_label_set_text(lbl_activity_ble_name, b);
 }
 
 void ui_app_refresh_clock(void)

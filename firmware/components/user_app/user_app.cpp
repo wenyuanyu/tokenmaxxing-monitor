@@ -212,6 +212,7 @@ void UserApp_AppInit(void)
 void UserApp_UiInit(void)
 {
     ui_app_init();
+    ui_app_set_ble_name(ble_app_device_name());
 }
 
 void UserApp_TaskInit(void)

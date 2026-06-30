@@ -45,7 +45,7 @@ tools/lvgl_preview/
 Run with:
 
 ```bash
-TOKEN_MONITOR_DATASOURCES=qwen,codex,claude QWEN_BLE_DEVICE_NAME=QwenToken npm start
+TOKEN_MONITOR_DATASOURCES=qwen,codex,claude QWEN_BLE_DEVICE_NAME=QwenToken_XXXX npm start
 ```
 
 Supported data sources:

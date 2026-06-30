@@ -47,7 +47,7 @@ cd firmware
 cp main/secrets.h.example main/secrets.h
 source ~/esp/esp-idf/export.sh
 idf.py set-target esp32s3
-idf.py -DRLCD_GREETING_NAME="YourName" -DRLCD_BLE_DEVICE_NAME="QwenToken" -p /dev/cu.usbmodem* build flash
+idf.py -DRLCD_GREETING_NAME="YourName" -p /dev/cu.usbmodem* build flash
 ```
 
 `RLCD_GREETING_NAME` can be left empty for a generic greeting. If it contains
@@ -139,16 +139,26 @@ outputs/lvgl-preview/activity.ppm
 
 ## Common Changes
 
-### Change the BLE device name
+### Pair the bridge with this device
+
+By default, the firmware advertises as `QwenToken_XXXX`, where `XXXX` is a
+4-character base36 suffix derived from the chip BT MAC. The bottom line of the
+screen shows the exact value:
+
+```text
+BLE Name: QwenToken_XXXX
+```
+
+Use that full name on the bridge side:
+
+```bash
+QWEN_BLE_DEVICE_NAME=QwenToken_XXXX npm start
+```
+
+To force a custom fixed name instead, build with:
 
 ```bash
 idf.py -DRLCD_BLE_DEVICE_NAME="MyTokenDisplay" build flash
-```
-
-Then run the bridge with:
-
-```bash
-QWEN_BLE_DEVICE_NAME=MyTokenDisplay npm start
 ```
 
 ### Change the greeting

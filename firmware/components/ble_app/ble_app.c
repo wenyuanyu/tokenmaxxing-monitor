@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_mac.h"
 #include "esp_log.h"
 #include "esp_bt.h"
 #include "host/ble_hs.h"
@@ -21,11 +22,54 @@
 #endif
 
 static const char *TAG = "ble_app";
-static const char *DEVICE_NAME = RLCD_BLE_DEVICE_NAME;
+static char s_device_name[32];
 
 static ble_data_cb_t s_data_cb;
 static uint8_t s_own_addr_type;
 static char s_last_payload[384] = "3|0|0|0|0|0|0|480|--|0|--|0|--|0|0|0";
+
+static void base36_4(uint32_t value, char out[5])
+{
+    static const char alphabet[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    value %= 36U * 36U * 36U * 36U;
+    for (int i = 3; i >= 0; i--) {
+        out[i] = alphabet[value % 36U];
+        value /= 36U;
+    }
+    out[4] = '\0';
+}
+
+static void ensure_device_name(void)
+{
+    if (s_device_name[0]) return;
+
+    const char *configured = RLCD_BLE_DEVICE_NAME;
+    if (configured[0] && strcmp(configured, "QwenToken") != 0) {
+        snprintf(s_device_name, sizeof(s_device_name), "%s", configured);
+        return;
+    }
+
+    uint8_t mac[6] = {0};
+    if (esp_read_mac(mac, ESP_MAC_BT) != ESP_OK) {
+        ESP_LOGW(TAG, "BT MAC unavailable, using default BLE name");
+        snprintf(s_device_name, sizeof(s_device_name), "QwenToken");
+        return;
+    }
+
+    uint32_t suffix_value = ((uint32_t)mac[2] << 24) |
+                            ((uint32_t)mac[3] << 16) |
+                            ((uint32_t)mac[4] << 8) |
+                            (uint32_t)mac[5];
+    char suffix[5];
+    base36_4(suffix_value, suffix);
+    snprintf(s_device_name, sizeof(s_device_name), "QwenToken_%s", suffix);
+}
+
+const char *ble_app_device_name(void)
+{
+    ensure_device_name();
+    return s_device_name;
+}
 
 static const ble_uuid128_t SVC_UUID =
     BLE_UUID128_INIT(0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88,
@@ -284,8 +328,8 @@ static void advertise(void)
     struct ble_hs_adv_fields fields;
     memset(&fields, 0, sizeof(fields));
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = (uint8_t *)DEVICE_NAME;
-    fields.name_len = strlen(DEVICE_NAME);
+    fields.name = (uint8_t *)ble_app_device_name();
+    fields.name_len = strlen(ble_app_device_name());
     fields.name_is_complete = 1;
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
@@ -304,7 +348,7 @@ static void advertise(void)
         ESP_LOGE(TAG, "adv start failed rc=%d", rc);
         return;
     }
-    ESP_LOGI(TAG, "advertising as %s", DEVICE_NAME);
+    ESP_LOGI(TAG, "advertising as %s", ble_app_device_name());
 }
 
 static int gap_event(struct ble_gap_event *event, void *arg)
@@ -356,6 +400,7 @@ static void host_task(void *param)
 esp_err_t ble_app_init(ble_data_cb_t cb)
 {
     s_data_cb = cb;
+    ensure_device_name();
 
     int rc = nimble_port_init();
     if (rc != ESP_OK) {
@@ -374,7 +419,7 @@ esp_err_t ble_app_init(ble_data_cb_t cb)
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_svc_gap_device_name_set(DEVICE_NAME);
+    ble_svc_gap_device_name_set(ble_app_device_name());
 
     rc = ble_gatts_count_cfg(GATT_SVCS);
     if (rc != 0) return ESP_FAIL;

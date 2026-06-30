@@ -229,6 +229,7 @@ class StatusManager: ObservableObject {
     @Published var bridgePID: Int = -1
     @Published var fileExists = false
     @Published var bleDeviceName: String = UserDefaults.standard.string(forKey: "bleDeviceName") ?? "QwenToken"
+    @Published var bridgeBusy = false
     @Published var launchAtLogin: Bool = {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -238,6 +239,7 @@ class StatusManager: ObservableObject {
 
     private var timer: Timer?
     private var bridgeShouldRun = false
+    private let bridgeQueue = DispatchQueue(label: "io.github.tokenmaxxing.bridge-control")
 
     func start() {
         ensureLaunchAtLogin()
@@ -248,6 +250,12 @@ class StatusManager: ObservableObject {
     func stop() {
         bridgeShouldRun = false
         timer?.invalidate()
+    }
+
+    func stopForTermination() {
+        bridgeShouldRun = false
+        timer?.invalidate()
+        stopSync()
     }
 
     private func refresh() {
@@ -275,12 +283,10 @@ class StatusManager: ObservableObject {
         return dir + "/io.github.tokenmaxxing.rlcd-bridge.plist"
     }
 
-    private func writeLaunchAgent() -> Bool {
+    private func writeLaunchAgent(name: String) -> Bool {
         guard let nodePath = findLaunchAgentNode() else { return false }
         guard let scriptPath = bridgeScriptPath() else { return false }
         let bridgeDir = (scriptPath as NSString).deletingLastPathComponent
-        let trimmedName = bleDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmedName.isEmpty ? "QwenToken" : trimmedName
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -314,6 +320,40 @@ class StatusManager: ObservableObject {
         }
     }
 
+    private func setBridgeBusy(_ busy: Bool) {
+        DispatchQueue.main.async { self.bridgeBusy = busy }
+    }
+
+    private func startSync(name: String) {
+        guard writeLaunchAgent(name: name) else { return }
+        let domain = "gui/\(getuid())"
+        let plist = launchAgentPath()
+        if !runLaunchctl(["bootstrap", domain, plist]) {
+            _ = runLaunchctl(["bootout", domain, plist])
+            _ = runLaunchctl(["bootstrap", domain, plist])
+        }
+        _ = runLaunchctl(["kickstart", "-k", "\(domain)/io.github.tokenmaxxing.rlcd-bridge"])
+        Thread.sleep(forTimeInterval: 0.5)
+        refresh()
+    }
+
+    private func stopSync() {
+        _ = runLaunchctl(["bootout", "gui/\(getuid())", launchAgentPath()])
+        Thread.sleep(forTimeInterval: 0.5)
+        refresh()
+    }
+
+    private func restartSync(name: String) {
+        stopSync()
+        Thread.sleep(forTimeInterval: 1)
+        startSync(name: name)
+    }
+
+    private func selectedBleDeviceName() -> String {
+        let trimmed = bleDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "QwenToken" : trimmed
+    }
+
     @discardableResult
     private func runLaunchctl(_ args: [String]) -> Bool {
         let process = Process()
@@ -331,40 +371,53 @@ class StatusManager: ObservableObject {
 
     func doStart() {
         bridgeShouldRun = true
-        guard writeLaunchAgent() else { return }
-        let domain = "gui/\(getuid())"
-        let plist = launchAgentPath()
-        if !runLaunchctl(["bootstrap", domain, plist]) {
-            _ = runLaunchctl(["bootout", domain, plist])
-            _ = runLaunchctl(["bootstrap", domain, plist])
+        let name = selectedBleDeviceName()
+        setBridgeBusy(true)
+        bridgeQueue.async {
+            self.startSync(name: name)
+            self.setBridgeBusy(false)
         }
-        _ = runLaunchctl(["kickstart", "-k", "\(domain)/io.github.tokenmaxxing.rlcd-bridge"])
-        Thread.sleep(forTimeInterval: 0.5)
-        refresh()
     }
 
     func doStop() {
         bridgeShouldRun = false
-        _ = runLaunchctl(["bootout", "gui/\(getuid())", launchAgentPath()])
-        Thread.sleep(forTimeInterval: 0.5)
-        refresh()
+        setBridgeBusy(true)
+        bridgeQueue.async {
+            self.stopSync()
+            self.setBridgeBusy(false)
+        }
     }
 
     func doRestart() {
-        bridgeShouldRun = false
-        doStop()
-        Thread.sleep(forTimeInterval: 1)
-        doStart()
+        bridgeShouldRun = true
+        let name = selectedBleDeviceName()
+        setBridgeBusy(true)
+        bridgeQueue.async {
+            self.restartSync(name: name)
+            self.setBridgeBusy(false)
+        }
     }
 
     func doRestartAfterWake() {
         if !bridgeShouldRun { return }
-        doRestart()
+        let name = selectedBleDeviceName()
+        setBridgeBusy(true)
+        bridgeQueue.async {
+            self.restartSync(name: name)
+            self.setBridgeBusy(false)
+        }
     }
 
     func applyBleDeviceName() {
-        UserDefaults.standard.set(bleDeviceName, forKey: "bleDeviceName")
-        doRestart()
+        let name = selectedBleDeviceName()
+        bleDeviceName = name
+        UserDefaults.standard.set(name, forKey: "bleDeviceName")
+        bridgeShouldRun = true
+        setBridgeBusy(true)
+        bridgeQueue.async {
+            self.restartSync(name: name)
+            self.setBridgeBusy(false)
+        }
     }
 
     func toggleLaunchAtLogin() {
@@ -574,8 +627,9 @@ struct DashboardView: View {
                         .onChange(of: manager.bleDeviceName) { value in
                             if bleNameFocused { scanner.updatePrefix(value) }
                         }
-                    Button("Apply") { manager.applyBleDeviceName() }
+                    Button(manager.bridgeBusy ? "Applying" : "Apply") { manager.applyBleDeviceName() }
                         .font(.system(size: 11))
+                        .disabled(manager.bridgeBusy)
                 }
 
                 if bleNameFocused || scanner.scanning || !scanner.devices.isEmpty {
@@ -636,17 +690,18 @@ struct DashboardView: View {
             HStack(spacing: 8) {
                 if manager.bridgeRunning {
                     Button("Stop") { manager.doStop() }
+                        .disabled(manager.bridgeBusy)
                     Button("Restart") { manager.doRestart() }
+                        .disabled(manager.bridgeBusy)
                 } else {
                     Button("Start") { manager.doStart() }
+                        .disabled(manager.bridgeBusy)
                 }
                 Spacer()
                 Button("Open Log") {
                     NSWorkspace.shared.open(URL(fileURLWithPath: LOG_FILE))
                 }
                 Button("Quit") {
-                    manager.doStop()
-                    manager.stop()
                     NSApp.terminate(nil)
                 }
             }
@@ -750,8 +805,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ n: Notification) {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         wakeRestartWorkItem?.cancel()
-        manager.doStop()
-        manager.stop()
+        manager.stopForTermination()
     }
 }
 

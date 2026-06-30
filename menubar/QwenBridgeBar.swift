@@ -484,71 +484,6 @@ struct StatusDot: View {
     }
 }
 
-struct FocusResignMonitor: NSViewRepresentable {
-    let isFocused: () -> Bool
-    let onResign: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(isFocused: isFocused, onResign: onResign)
-    }
-
-    func makeNSView(context: Context) -> NSView {
-        context.coordinator.install()
-        return NSView(frame: .zero)
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        context.coordinator.isFocused = isFocused
-        context.coordinator.onResign = onResign
-    }
-
-    final class Coordinator {
-        var isFocused: () -> Bool
-        var onResign: () -> Void
-        private var monitor: Any?
-
-        init(isFocused: @escaping () -> Bool, onResign: @escaping () -> Void) {
-            self.isFocused = isFocused
-            self.onResign = onResign
-        }
-
-        deinit {
-            if let monitor {
-                NSEvent.removeMonitor(monitor)
-            }
-        }
-
-        func install() {
-            guard monitor == nil else { return }
-            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
-                self?.handle(event)
-                return event
-            }
-        }
-
-        private func handle(_ event: NSEvent) {
-            guard isFocused(), let window = event.window else { return }
-            let hitView = window.contentView?.hitTest(event.locationInWindow)
-            guard !Self.isTextInput(hitView) else { return }
-            DispatchQueue.main.async {
-                self.onResign()
-                window.makeFirstResponder(nil)
-            }
-        }
-
-        private static func isTextInput(_ view: NSView?) -> Bool {
-            var current = view
-            while let candidate = current {
-                if candidate is NSTextField || candidate is NSTextView {
-                    return true
-                }
-                current = candidate.superview
-            }
-            return false
-        }
-    }
-}
-
 struct DashboardView: View {
     @ObservedObject var manager: StatusManager
     @StateObject private var scanner = BleDeviceScanner()
@@ -791,9 +726,12 @@ struct DashboardView: View {
         .padding(.top, 14)
         .padding(.bottom, 14)
         .frame(width: 340)
-        .background(FocusResignMonitor(isFocused: { bleNameFocused }) {
-            dismissBlePicker()
-        })
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if bleNameFocused {
+                dismissBlePicker()
+            }
+        }
     }
 }
 

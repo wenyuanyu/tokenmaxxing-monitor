@@ -157,6 +157,10 @@ open QwenBridgeBar.app
 App 会打包 bridge 脚本和 `node_modules`，启动 bridge 子进程，读取
 `/tmp/qwen-token-status.json`，并在 macOS 13+ 上注册 Login Item。
 
+配对时，聚焦菜单栏 App 里的 BLE Name 输入框，它会自动扫描附近匹配的设备；
+选择设备屏幕最下方显示的完整 BLE 名，例如 `QwenToken_XXXX`，再点击 **Apply**。
+Bridge 之后只会精确连接这个名字，不会误连工位附近的其他 TokenMaxxing 设备。
+
 生成的 DMG：
 
 ```text

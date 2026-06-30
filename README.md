@@ -158,6 +158,11 @@ The app bundles the bridge script and `node_modules`, starts the bridge as a
 child process, reads `/tmp/qwen-token-status.json`, and can register itself as a
 Login Item on macOS 13+.
 
+For pairing, focus the BLE Name field in the menu bar app. It scans nearby
+matching devices automatically; select the full BLE name shown on the device
+bottom line, such as `QwenToken_XXXX`, then click **Apply**. The bridge then uses
+that exact name and will not connect to other nearby TokenMaxxing devices.
+
 The generated DMG is:
 
 ```text

@@ -37,6 +37,93 @@ struct TokenStatus: Codable {
     }
 }
 
+struct DiscoveredBleDevice: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let rssi: Int
+    let lastSeen: Date
+}
+
+final class BleDeviceScanner: NSObject, ObservableObject, CBCentralManagerDelegate {
+    @Published var devices: [DiscoveredBleDevice] = []
+    @Published var scanning = false
+    @Published var bluetoothReady = false
+
+    private var central: CBCentralManager?
+    private var prefix = "QwenToken"
+
+    func start(prefix: String) {
+        self.prefix = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        if central == nil {
+            central = CBCentralManager(
+                delegate: self,
+                queue: .main,
+                options: [CBCentralManagerOptionShowPowerAlertKey: true]
+            )
+        }
+        devices = []
+        scanning = true
+        startScanIfReady()
+    }
+
+    func updatePrefix(_ prefix: String) {
+        let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != self.prefix else { return }
+        self.prefix = trimmed
+        devices = []
+        if scanning {
+            central?.stopScan()
+            startScanIfReady()
+        }
+    }
+
+    func stop() {
+        central?.stopScan()
+        scanning = false
+    }
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        bluetoothReady = central.state == .poweredOn
+        if bluetoothReady && scanning {
+            startScanIfReady()
+        }
+    }
+
+    private func startScanIfReady() {
+        guard scanning, central?.state == .poweredOn else { return }
+        central?.scanForPeripherals(
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                        didDiscover peripheral: CBPeripheral,
+                        advertisementData: [String: Any],
+                        rssi RSSI: NSNumber) {
+        let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
+            ?? peripheral.name
+            ?? ""
+        guard !prefix.isEmpty, name.hasPrefix(prefix) else { return }
+
+        let device = DiscoveredBleDevice(
+            id: peripheral.identifier.uuidString,
+            name: name,
+            rssi: RSSI.intValue,
+            lastSeen: Date()
+        )
+        if let idx = devices.firstIndex(where: { $0.id == device.id || $0.name == device.name }) {
+            devices[idx] = device
+        } else {
+            devices.append(device)
+        }
+        devices.sort { lhs, rhs in
+            if lhs.name == rhs.name { return lhs.rssi > rhs.rssi }
+            return lhs.name < rhs.name
+        }
+    }
+}
+
 // MARK: - Formatting
 
 func fmtTokens(_ t: Int64) -> String {
@@ -141,7 +228,7 @@ class StatusManager: ObservableObject {
     @Published var bridgeRunning = false
     @Published var bridgePID: Int = -1
     @Published var fileExists = false
-    @Published var bleDeviceName: String = UserDefaults.standard.string(forKey: "bleDeviceName") ?? ""
+    @Published var bleDeviceName: String = UserDefaults.standard.string(forKey: "bleDeviceName") ?? "QwenToken"
     @Published var launchAtLogin: Bool = {
         if #available(macOS 13.0, *) {
             return SMAppService.mainApp.status == .enabled
@@ -192,7 +279,8 @@ class StatusManager: ObservableObject {
         guard let nodePath = findLaunchAgentNode() else { return false }
         guard let scriptPath = bridgeScriptPath() else { return false }
         let bridgeDir = (scriptPath as NSString).deletingLastPathComponent
-        let name = bleDeviceName.isEmpty ? "QwenToken" : bleDeviceName
+        let trimmedName = bleDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmedName.isEmpty ? "QwenToken" : trimmedName
         let plist = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -344,6 +432,8 @@ struct StatusDot: View {
 
 struct DashboardView: View {
     @ObservedObject var manager: StatusManager
+    @StateObject private var scanner = BleDeviceScanner()
+    @FocusState private var bleNameFocused: Bool
 
     private var s: TokenStatus { manager.status }
 
@@ -463,17 +553,72 @@ struct DashboardView: View {
             }
             .padding(.vertical, 8)
 
-            // ── BLE Device Name ──
+            // ── BLE Pairing ──
             Divider()
 
-            HStack(spacing: 8) {
-                Text("BLE Name:")
-                    .font(.system(size: 11))
-                TextField("QwenToken", text: $manager.bleDeviceName)
-                    .font(.system(size: 11))
-                    .textFieldStyle(.roundedBorder)
-                Button("Apply") { manager.applyBleDeviceName() }
-                    .font(.system(size: 11))
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("BLE Name:")
+                        .font(.system(size: 11))
+                    TextField("QwenToken_XXXX", text: $manager.bleDeviceName)
+                        .font(.system(size: 11))
+                        .textFieldStyle(.roundedBorder)
+                        .focused($bleNameFocused)
+                        .onChange(of: bleNameFocused) { focused in
+                            if focused {
+                                scanner.start(prefix: manager.bleDeviceName)
+                            } else {
+                                scanner.stop()
+                            }
+                        }
+                        .onChange(of: manager.bleDeviceName) { value in
+                            if bleNameFocused { scanner.updatePrefix(value) }
+                        }
+                    Button("Apply") { manager.applyBleDeviceName() }
+                        .font(.system(size: 11))
+                }
+
+                if bleNameFocused || scanner.scanning || !scanner.devices.isEmpty {
+                    VStack(spacing: 4) {
+                        HStack(spacing: 6) {
+                            if scanner.scanning && scanner.bluetoothReady {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .scaleEffect(0.55)
+                                    .frame(width: 12, height: 12)
+                            }
+                            Text(scanner.bluetoothReady ? "Matching nearby devices" : "Bluetooth unavailable")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+
+                        ForEach(scanner.devices.prefix(4)) { device in
+                            Button {
+                                manager.bleDeviceName = device.name
+                                scanner.stop()
+                            } label: {
+                                HStack {
+                                    Text(device.name)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(device.rssi) dBm")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(.quaternary.opacity(0.35))
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                        }
+                    }
+                    .padding(6)
+                    .background(.quaternary.opacity(0.25))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
             }
             .padding(.vertical, 6)
 
@@ -543,7 +688,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 340, height: 500)
+        popover.contentSize = NSSize(width: 340, height: 560)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: DashboardView(manager: manager))
 
